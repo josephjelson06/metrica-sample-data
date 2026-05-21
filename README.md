@@ -19,8 +19,10 @@ The original sample data is still here, but the workspace is now organized so it
   - LLM routing logic
 - `api/`
   - FastAPI websocket server
+- `frontend/`
+  - Next.js + TypeScript frontend
 - `static/`
-  - tiny frontend UI
+  - older lightweight fallback frontend UI
 - `logs/`
   - saved server and debugging logs
 - `main.py`
@@ -43,7 +45,8 @@ Useful working files:
 - [DuckDB engine](C:/Users/josep/OneDrive/Desktop/sample-data/tools/db_engine.py)
 - [LLM router](C:/Users/josep/OneDrive/Desktop/sample-data/core/llm_router.py)
 - [WebSocket server](C:/Users/josep/OneDrive/Desktop/sample-data/api/websocket_server.py)
-- [Frontend](C:/Users/josep/OneDrive/Desktop/sample-data/static/index.html)
+- [Next frontend](C:/Users/josep/OneDrive/Desktop/sample-data/frontend/README.md)
+- [Fallback frontend](C:/Users/josep/OneDrive/Desktop/sample-data/static/index.html)
 
 ## About the repo
 In this repository you can find sample tracking and event data that exemplify the Elite data package we offer. The idea of this data is twofold: 
