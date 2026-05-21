@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
-from core.llm_router import route_tracking_query
+from core.llm_router import route_analysis_query
 
 
 app = FastAPI()
@@ -36,12 +36,13 @@ def _extract_query(message_text: str) -> str:
     return query
 
 
-def _build_render_message(coordinates: dict[str, dict[str, float | int | None]]) -> dict[str, Any]:
+def _build_render_message(analysis_result: dict[str, Any]) -> dict[str, Any]:
     return {
         "type": "DATA_RENDER",
         "payload": {
             "view": "PITCH_HOME",
-            "data": coordinates,
+            "data": analysis_result["coordinates"],
+            "context": analysis_result["context"],
         },
     }
 
@@ -60,8 +61,8 @@ async def analysis_socket(websocket: WebSocket) -> None:
             message_text = await websocket.receive_text()
             try:
                 query = _extract_query(message_text)
-                coordinates = await asyncio.to_thread(route_tracking_query, query)
-                await websocket.send_json(_build_render_message(coordinates))
+                analysis_result = await asyncio.to_thread(route_analysis_query, query)
+                await websocket.send_json(_build_render_message(analysis_result))
             except Exception as exc:
                 await websocket.send_json(
                     {

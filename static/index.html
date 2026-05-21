@@ -39,7 +39,7 @@
       width: min(1200px, calc(100vw - 32px));
       margin: 24px auto;
       display: grid;
-      grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+      grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
       gap: 24px;
     }
 
@@ -97,7 +97,7 @@
 
     textarea {
       width: 100%;
-      min-height: 112px;
+      min-height: 120px;
       resize: vertical;
       border-radius: 18px;
       border: 1px solid rgba(20, 32, 19, 0.14);
@@ -176,6 +176,17 @@
       font-size: 14px;
     }
 
+    .event-banner {
+      margin: 0;
+      padding: 12px 16px;
+      border-radius: 16px;
+      background: rgba(255, 248, 239, 0.9);
+      color: var(--ink);
+      border: 1px solid rgba(194, 65, 12, 0.14);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
     .pitch {
       position: relative;
       width: 100%;
@@ -213,8 +224,7 @@
     .center-spot,
     .box,
     .six-box,
-    .penalty-spot,
-    .arc {
+    .penalty-spot {
       position: absolute;
       pointer-events: none;
       border-color: var(--line);
@@ -318,7 +328,7 @@
 
     pre {
       margin: 0;
-      max-height: 220px;
+      max-height: 240px;
       overflow: auto;
       border-radius: 18px;
       padding: 16px;
@@ -349,15 +359,15 @@
       <p class="eyebrow">Live Analysis</p>
       <h1>Metrica Query Console</h1>
       <p class="blurb">
-        Ask for a moment in the match, and the backend will route your query through Groq,
-        convert the minute to a frame, and stream the coordinates back onto the pitch.
+        Ask for a moment or event in the match. The backend will route your query through Groq,
+        resolve the matching frame, and stream both coordinates and event context back to the pitch.
       </p>
 
       <p class="status" id="status"><strong>Status:</strong> Connecting...</p>
 
       <div class="field-group">
         <label for="query">Natural language query</label>
-        <textarea id="query">Give me the coordinates for minute 5</textarea>
+        <textarea id="query">Show me the away team's second corner</textarea>
       </div>
 
       <button id="sendButton" type="button">Render Positions</button>
@@ -369,7 +379,8 @@
       </div>
 
       <p class="hint">
-        Try prompts like “Show me the player positions at minute 2” or “Give me the coordinates for minute 12”.
+        Try prompts like "Show me the player positions at minute 2", "Show me the home team's first saved shot",
+        "Show me the last goal before 70:00", or "Show me the pass after frame 20000".
       </p>
 
       <pre id="rawOutput">Waiting for data...</pre>
@@ -380,6 +391,10 @@
         <h2 class="pitch-title">PITCH_HOME View</h2>
         <p class="pitch-meta" id="pitchMeta">No frame rendered yet.</p>
       </div>
+
+      <p class="event-banner" id="eventBanner">
+        Waiting for a query. Event and frame context will appear here.
+      </p>
 
       <div class="pitch" id="pitch">
         <div class="center-circle"></div>
@@ -402,6 +417,7 @@
     const rawOutputEl = document.getElementById("rawOutput");
     const markerLayer = document.getElementById("markerLayer");
     const pitchMeta = document.getElementById("pitchMeta");
+    const eventBanner = document.getElementById("eventBanner");
 
     let socket = null;
 
@@ -437,10 +453,13 @@
         rawOutputEl.textContent = JSON.stringify(message, null, 2);
 
         if (message.type === "DATA_RENDER") {
-          drawCoordinates(message.payload.data || {});
-          pitchMeta.textContent = `${Object.keys(message.payload.data || {}).length} tracked entities rendered.`;
+          const data = message.payload.data || {};
+          const context = message.payload.context || {};
+          drawCoordinates(data);
+          renderContext(context, data);
         } else if (message.type === "ERROR") {
           pitchMeta.textContent = "The backend returned an error.";
+          eventBanner.textContent = message.payload?.message || "Unknown backend error.";
         }
       });
     }
@@ -483,6 +502,27 @@
         return "Ball";
       }
       return name.replace(/^Home_/, "").replace(/^Away_/, "").replace("Player", "P");
+    }
+
+    function renderContext(context, data) {
+      const count = Object.keys(data || {}).length;
+      const frame = context?.frame ?? "unknown";
+      pitchMeta.textContent = `${count} tracked entities rendered at frame ${frame}.`;
+
+      if (context?.event) {
+        const event = context.event;
+        const subtype = event.subtype ? ` / ${event.subtype}` : "";
+        const team = event.team || "Unknown team";
+        const fromPlayer = event.from_player || "Unknown player";
+        const relation = event.relation || "exact";
+        const startTime = event.start_time_s != null ? `${Number(event.start_time_s).toFixed(2)}s` : "unknown time";
+        eventBanner.textContent =
+          `${team} ${event.type}${subtype} found at frame ${event.frame} (${startTime}). ` +
+          `From: ${fromPlayer}. Relation: ${relation}.`;
+      } else {
+        eventBanner.textContent =
+          `Direct frame lookup resolved to frame ${frame}. No event lookup was needed for this query.`;
+      }
     }
 
     function drawCoordinates(data) {
