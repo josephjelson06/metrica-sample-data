@@ -1,0 +1,8 @@
+pandas
+pyarrow
+duckdb
+groq
+python-dotenv
+fastapi
+uvicorn
+websockets

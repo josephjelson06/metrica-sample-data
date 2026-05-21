@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Metrica Live Pitch</title>
+  <style>
+    :root {
+      --bg: #f2efe4;
+      --panel: rgba(250, 248, 241, 0.9);
+      --ink: #142013;
+      --muted: #5f6d5c;
+      --grass-dark: #25663a;
+      --grass-mid: #2f7b43;
+      --grass-light: #3c9250;
+      --line: rgba(250, 252, 243, 0.95);
+      --home: #f6f3e7;
+      --away: #ff8359;
+      --ball: #1a1a1a;
+      --accent: #c2410c;
+      --shadow: 0 24px 60px rgba(20, 32, 19, 0.18);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Georgia, "Times New Roman", serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(255, 255, 255, 0.7), transparent 28%),
+        linear-gradient(135deg, #ebe3cf 0%, #f7f2e7 45%, #dfead6 100%);
+    }
+
+    .shell {
+      width: min(1200px, calc(100vw - 32px));
+      margin: 24px auto;
+      display: grid;
+      grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+      gap: 24px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid rgba(20, 32, 19, 0.08);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    .control-panel {
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .eyebrow {
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      font-size: 12px;
+      color: var(--accent);
+      margin: 0;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2rem, 3vw, 3rem);
+      line-height: 0.95;
+    }
+
+    .blurb,
+    .status,
+    .hint {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .status strong {
+      color: var(--ink);
+    }
+
+    .field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    label {
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 112px;
+      resize: vertical;
+      border-radius: 18px;
+      border: 1px solid rgba(20, 32, 19, 0.14);
+      padding: 14px 16px;
+      font: inherit;
+      color: var(--ink);
+      background: rgba(255, 255, 255, 0.86);
+    }
+
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 14px 20px;
+      font: inherit;
+      font-weight: 700;
+      color: #fff8ef;
+      background: linear-gradient(135deg, #a43408, #d75b1f);
+      cursor: pointer;
+      transition: transform 140ms ease, box-shadow 140ms ease;
+      box-shadow: 0 16px 30px rgba(194, 65, 12, 0.26);
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+    }
+
+    button:disabled {
+      opacity: 0.7;
+      cursor: wait;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    .swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      box-shadow: 0 0 0 2px rgba(20, 32, 19, 0.1);
+    }
+
+    .pitch-wrap {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .pitch-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      padding: 6px 6px 0;
+    }
+
+    .pitch-title {
+      margin: 0;
+      font-size: 1.2rem;
+    }
+
+    .pitch-meta {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .pitch {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 105 / 68;
+      border-radius: 28px;
+      overflow: hidden;
+      background:
+        linear-gradient(90deg, rgba(255,255,255,0.05) 0 50%, rgba(255,255,255,0.02) 50% 100%),
+        repeating-linear-gradient(
+          90deg,
+          var(--grass-dark) 0 10%,
+          var(--grass-mid) 10% 20%,
+          var(--grass-light) 20% 30%
+        );
+      box-shadow: inset 0 0 0 2px rgba(255,255,255,0.12);
+    }
+
+    .pitch::before,
+    .pitch::after {
+      content: "";
+      position: absolute;
+      inset: 3.5%;
+      border: 2px solid var(--line);
+      pointer-events: none;
+    }
+
+    .pitch::after {
+      inset: auto 50% 3.5% auto;
+      width: 0;
+      height: calc(100% - 7%);
+      border-width: 0 0 0 2px;
+    }
+
+    .center-circle,
+    .center-spot,
+    .box,
+    .six-box,
+    .penalty-spot,
+    .arc {
+      position: absolute;
+      pointer-events: none;
+      border-color: var(--line);
+    }
+
+    .center-circle {
+      width: 18%;
+      aspect-ratio: 1;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      border: 2px solid var(--line);
+      border-radius: 999px;
+    }
+
+    .center-spot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--line);
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    .box.left { left: 3.5%; }
+    .box.right { right: 3.5%; }
+    .box {
+      top: 21%;
+      width: 12%;
+      height: 58%;
+      border: 2px solid var(--line);
+    }
+
+    .six-box.left { left: 3.5%; }
+    .six-box.right { right: 3.5%; }
+    .six-box {
+      top: 34%;
+      width: 5%;
+      height: 32%;
+      border: 2px solid var(--line);
+    }
+
+    .penalty-spot.left { left: 14%; }
+    .penalty-spot.right { right: 14%; }
+    .penalty-spot {
+      top: 50%;
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--line);
+      transform: translateY(-50%);
+    }
+
+    .marker-layer {
+      position: absolute;
+      inset: 0;
+    }
+
+    .marker {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      border: 2px solid rgba(0, 0, 0, 0.18);
+      box-shadow: 0 10px 18px rgba(0, 0, 0, 0.18);
+    }
+
+    .marker.home .dot {
+      background: var(--home);
+    }
+
+    .marker.away .dot {
+      background: var(--away);
+    }
+
+    .marker.ball .dot {
+      width: 12px;
+      height: 12px;
+      background: var(--ball);
+      border-color: rgba(255, 255, 255, 0.5);
+    }
+
+    .label {
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: rgba(20, 32, 19, 0.7);
+      color: #fefcf5;
+      font-size: 11px;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    pre {
+      margin: 0;
+      max-height: 220px;
+      overflow: auto;
+      border-radius: 18px;
+      padding: 16px;
+      background: rgba(20, 32, 19, 0.92);
+      color: #edf4e5;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 900px) {
+      .shell {
+        grid-template-columns: 1fr;
+      }
+
+      .control-panel {
+        order: 2;
+      }
+
+      .pitch-wrap {
+        order: 1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="panel control-panel">
+      <p class="eyebrow">Live Analysis</p>
+      <h1>Metrica Query Console</h1>
+      <p class="blurb">
+        Ask for a moment in the match, and the backend will route your query through Groq,
+        convert the minute to a frame, and stream the coordinates back onto the pitch.
+      </p>
+
+      <p class="status" id="status"><strong>Status:</strong> Connecting...</p>
+
+      <div class="field-group">
+        <label for="query">Natural language query</label>
+        <textarea id="query">Give me the coordinates for minute 5</textarea>
+      </div>
+
+      <button id="sendButton" type="button">Render Positions</button>
+
+      <div class="legend">
+        <span class="legend-item"><span class="swatch" style="background: var(--home);"></span>Home team</span>
+        <span class="legend-item"><span class="swatch" style="background: var(--away);"></span>Away team</span>
+        <span class="legend-item"><span class="swatch" style="background: var(--ball);"></span>Ball</span>
+      </div>
+
+      <p class="hint">
+        Try prompts like “Show me the player positions at minute 2” or “Give me the coordinates for minute 12”.
+      </p>
+
+      <pre id="rawOutput">Waiting for data...</pre>
+    </section>
+
+    <section class="panel pitch-wrap">
+      <div class="pitch-header">
+        <h2 class="pitch-title">PITCH_HOME View</h2>
+        <p class="pitch-meta" id="pitchMeta">No frame rendered yet.</p>
+      </div>
+
+      <div class="pitch" id="pitch">
+        <div class="center-circle"></div>
+        <div class="center-spot"></div>
+        <div class="box left"></div>
+        <div class="box right"></div>
+        <div class="six-box left"></div>
+        <div class="six-box right"></div>
+        <div class="penalty-spot left"></div>
+        <div class="penalty-spot right"></div>
+        <div class="marker-layer" id="markerLayer"></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const statusEl = document.getElementById("status");
+    const queryEl = document.getElementById("query");
+    const sendButton = document.getElementById("sendButton");
+    const rawOutputEl = document.getElementById("rawOutput");
+    const markerLayer = document.getElementById("markerLayer");
+    const pitchMeta = document.getElementById("pitchMeta");
+
+    let socket = null;
+
+    function setStatus(text) {
+      statusEl.innerHTML = `<strong>Status:</strong> ${text}`;
+    }
+
+    function getSocketUrl() {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      return `${protocol}//${window.location.host}/ws/analysis`;
+    }
+
+    function connectSocket() {
+      socket = new WebSocket(getSocketUrl());
+
+      socket.addEventListener("open", () => {
+        setStatus("Connected");
+        sendButton.disabled = false;
+      });
+
+      socket.addEventListener("close", () => {
+        setStatus("Disconnected. Reconnecting...");
+        sendButton.disabled = true;
+        window.setTimeout(connectSocket, 1200);
+      });
+
+      socket.addEventListener("error", () => {
+        setStatus("Connection error");
+      });
+
+      socket.addEventListener("message", (event) => {
+        const message = JSON.parse(event.data);
+        rawOutputEl.textContent = JSON.stringify(message, null, 2);
+
+        if (message.type === "DATA_RENDER") {
+          drawCoordinates(message.payload.data || {});
+          pitchMeta.textContent = `${Object.keys(message.payload.data || {}).length} tracked entities rendered.`;
+        } else if (message.type === "ERROR") {
+          pitchMeta.textContent = "The backend returned an error.";
+        }
+      });
+    }
+
+    function sendQuery() {
+      const query = queryEl.value.trim();
+      if (!query) {
+        setStatus("Enter a query first");
+        return;
+      }
+
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        setStatus("Socket is not connected yet");
+        return;
+      }
+
+      sendButton.disabled = true;
+      setStatus("Querying backend...");
+      socket.send(JSON.stringify({ query }));
+      window.setTimeout(() => {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          sendButton.disabled = false;
+          setStatus("Connected");
+        }
+      }, 700);
+    }
+
+    function getMarkerClass(name) {
+      if (name === "Ball") {
+        return "ball";
+      }
+      if (name.startsWith("Home_")) {
+        return "home";
+      }
+      return "away";
+    }
+
+    function getMarkerLabel(name) {
+      if (name === "Ball") {
+        return "Ball";
+      }
+      return name.replace(/^Home_/, "").replace(/^Away_/, "").replace("Player", "P");
+    }
+
+    function drawCoordinates(data) {
+      markerLayer.innerHTML = "";
+
+      for (const [name, coords] of Object.entries(data)) {
+        if (!coords || coords.x == null || coords.y == null) {
+          continue;
+        }
+
+        const marker = document.createElement("div");
+        marker.className = `marker ${getMarkerClass(name)}`;
+        marker.style.left = `${Number(coords.x) * 100}%`;
+        marker.style.top = `${Number(coords.y) * 100}%`;
+
+        const dot = document.createElement("div");
+        dot.className = "dot";
+
+        const label = document.createElement("div");
+        label.className = "label";
+        label.textContent = getMarkerLabel(name);
+
+        marker.appendChild(dot);
+        marker.appendChild(label);
+        markerLayer.appendChild(marker);
+      }
+    }
+
+    sendButton.addEventListener("click", sendQuery);
+    queryEl.addEventListener("keydown", (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        sendQuery();
+      }
+    });
+
+    sendButton.disabled = true;
+    connectSocket();
+  </script>
+</body>
+</html>

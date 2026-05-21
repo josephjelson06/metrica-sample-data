@@ -1,5 +1,50 @@
 # Metrica Sports Sample Data
 
+## Project structure for this workspace
+
+The original sample data is still here, but the workspace is now organized so it is easier to explain:
+
+- `data/`
+  - original Metrica sample files
+  - `data/parquet/` for generated Parquet outputs
+- `docs/`
+  - `docs/guides/` for dataset explanations
+  - `docs/reports/` for day-by-day progress notes
+- `scripts/`
+  - CSV to Parquet conversion scripts
+  - websocket test client
+- `tools/`
+  - DuckDB query helpers
+- `core/`
+  - LLM routing logic
+- `api/`
+  - FastAPI websocket server
+- `static/`
+  - tiny frontend UI
+- `logs/`
+  - saved server and debugging logs
+- `main.py`
+  - FastAPI app entrypoint
+- `.env`
+  - local secrets such as the Groq API key
+- `requirements.txt`
+  - Python dependencies
+
+## Quick project map
+
+Useful explanation files:
+
+- [Sample Game 2 Data Guide](C:/Users/josep/OneDrive/Desktop/sample-data/docs/guides/Sample_Game_2_Data_Guide.md)
+- [Day 1 Progress Report](C:/Users/josep/OneDrive/Desktop/sample-data/docs/reports/Day_1_Progress_Report.md)
+
+Useful working files:
+
+- [Merged tracking converter](C:/Users/josep/OneDrive/Desktop/sample-data/scripts/convert_data.py)
+- [DuckDB engine](C:/Users/josep/OneDrive/Desktop/sample-data/tools/db_engine.py)
+- [LLM router](C:/Users/josep/OneDrive/Desktop/sample-data/core/llm_router.py)
+- [WebSocket server](C:/Users/josep/OneDrive/Desktop/sample-data/api/websocket_server.py)
+- [Frontend](C:/Users/josep/OneDrive/Desktop/sample-data/static/index.html)
+
 ## About the repo
 In this repository you can find sample tracking and event data that exemplify the Elite data package we offer. The idea of this data is twofold: 
 1. to allow potential clients to check out this data and get familiar with our formats and data quality. 
