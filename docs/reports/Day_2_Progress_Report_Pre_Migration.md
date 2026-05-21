@@ -1,4 +1,4 @@
-# Day 2 Progress Report (Pre-Migration Checkpoint)
+# Day 2 Progress Report
 
 This document summarizes the Day 2 work completed before moving to a larger frontend migration.
 
@@ -311,4 +311,76 @@ That makes this a good checkpoint to commit before moving toward a more serious 
 - canvas-based rendering
 - smoother animation and interaction
 
-This concludes the Day 2 pre-migration checkpoint.
+## 12. Post-Migration Addendum (Completed After Checkpoint)
+
+After the pre-migration checkpoint, we completed the frontend migration and project cleanup without changing the core backend architecture.
+
+### Frontend migrated to Next.js + TypeScript
+
+A new frontend app was added in:
+
+- [frontend/](C:/Users/josep/OneDrive/Desktop/sample-data/frontend)
+
+Key files:
+
+- [page.tsx](C:/Users/josep/OneDrive/Desktop/sample-data/frontend/app/page.tsx)
+- [analysis-store.ts](C:/Users/josep/OneDrive/Desktop/sample-data/frontend/lib/analysis-store.ts)
+- [pitch-canvas.tsx](C:/Users/josep/OneDrive/Desktop/sample-data/frontend/components/pitch-canvas.tsx)
+- [analysis-workspace.tsx](C:/Users/josep/OneDrive/Desktop/sample-data/frontend/components/analysis-workspace.tsx)
+
+This frontend now:
+
+- connects to the websocket backend
+- submits natural-language queries
+- renders returned coordinates on a pitch canvas
+- shows event context from backend responses
+- supports frame controls and simple playback
+
+### Backend contract remained stable
+
+The websocket payload shape created earlier in Day 2 was preserved:
+
+- response `type` is `DATA_RENDER`
+- response `payload.view` is `PITCH_HOME`
+- response `payload.data` contains coordinates
+- response `payload.context` contains event/frame context
+
+This kept frontend integration straightforward.
+
+## 13. Repository Hygiene Improvements
+
+We also cleaned generated artifacts that should not be tracked in git:
+
+- removed tracked `.pyc` files
+- removed tracked log files
+- updated `.gitignore` to block these generated files
+
+Important ignored items now include:
+
+- Python cache and bytecode
+- local virtual environments
+- log files under `logs/`
+- frontend build/generated folders like `node_modules` and `.next`
+
+This makes commits cleaner and easier to explain in demos.
+
+## 14. Validation After Migration
+
+Post-migration validation confirmed:
+
+- backend DuckDB event + tracking lookups still work
+- Groq router still performs the two-step tool flow
+- websocket responses still stream structured data correctly
+- Next.js frontend builds successfully and renders against live backend data
+
+## 15. Current End-of-Day 2 State
+
+At this point, the system has:
+
+- optimized Parquet data files for tracking and events
+- DuckDB tools for event discovery and frame-based coordinate lookup
+- Groq routing that chains event query -> frame lookup
+- FastAPI websocket streaming for low-latency delivery
+- a migrated Next.js + TypeScript frontend with canvas rendering
+
+So Day 2 is now complete both in backend intelligence and in frontend migration readiness.
