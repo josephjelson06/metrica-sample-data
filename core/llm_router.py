@@ -9,7 +9,7 @@ from typing import Any
 from dotenv import load_dotenv
 from groq import Groq
 
-from tools.db_engine import find_event, get_tracking_frame
+from tools.db_engine import find_event, get_event_tracking_window, get_tracking_frame
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -311,6 +311,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
 
     resolved_event: dict[str, Any] | None = None
     resolved_frame: int | None = _extract_frame_hint(user_query)
+    tracking_sequence: dict[str, Any] | None = None
 
     for _ in range(MAX_TOOL_ITERATIONS):
         response = client.chat.completions.create(
@@ -352,8 +353,12 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
             )
 
         if tracking_result is not None:
+            if resolved_event is not None and resolved_frame is not None:
+                tracking_sequence = get_event_tracking_window(event_frame=resolved_frame)
+
             return {
                 "coordinates": tracking_result,
+                "sequence": tracking_sequence,
                 "context": {
                     "query": user_query,
                     "frame": resolved_frame,

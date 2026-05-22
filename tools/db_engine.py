@@ -10,6 +10,10 @@ import duckdb
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TRACKING_PARQUET_PATH = PROJECT_ROOT / "data" / "parquet" / "metrica_tracking.parquet"
 EVENTS_PARQUET_PATH = PROJECT_ROOT / "data" / "parquet" / "metrica_events.parquet"
+FRAMES_PER_SECOND = 25
+
+CoordinateValue = float | int | None
+CoordinateMap = dict[str, dict[str, CoordinateValue]]
 
 
 def _connect() -> duckdb.DuckDBPyConnection:
@@ -19,6 +23,48 @@ def _connect() -> duckdb.DuckDBPyConnection:
 def _require_file(path: Path, description: str) -> None:
     if not path.exists():
         raise FileNotFoundError(f"{description} not found at {path}.")
+
+
+def _get_tracking_coordinate_columns(connection: duckdb.DuckDBPyConnection) -> list[str]:
+    columns_info = connection.execute(
+        "DESCRIBE SELECT * FROM read_parquet(?)",
+        [str(TRACKING_PARQUET_PATH)],
+    ).fetchall()
+    return [
+        column_name
+        for column_name, *_ in columns_info
+        if column_name.endswith("_x") or column_name.endswith("_y")
+    ]
+
+
+def _build_coordinate_map(coordinate_columns: list[str], row_values: tuple[Any, ...]) -> CoordinateMap:
+    result: CoordinateMap = {}
+    for column_name, value in zip(coordinate_columns, row_values):
+        player_name, axis = column_name.rsplit("_", 1)
+        result.setdefault(player_name, {})[axis] = value
+    return result
+
+
+def _build_event_dict(row: tuple[Any, ...]) -> dict[str, Any]:
+    columns = [
+        "team",
+        "type",
+        "subtype",
+        "period",
+        "start_frame",
+        "start_time_s",
+        "end_frame",
+        "end_time_s",
+        "from_player",
+        "to_player",
+        "start_x",
+        "start_y",
+        "end_x",
+        "end_y",
+    ]
+    event = dict(zip(columns, row))
+    event["frame"] = int(event["start_frame"])
+    return event
 
 
 def find_event(
@@ -117,28 +163,11 @@ def find_event(
         }
         raise ValueError(f"No matching event found for {filters_used}.")
 
-    columns = [
-        "team",
-        "type",
-        "subtype",
-        "period",
-        "start_frame",
-        "start_time_s",
-        "end_frame",
-        "end_time_s",
-        "from_player",
-        "to_player",
-        "start_x",
-        "start_y",
-        "end_x",
-        "end_y",
-    ]
-    event = dict(zip(columns, row))
+    event = _build_event_dict(row)
     event["occurrence"] = occurrence
     event["order"] = order
     event["relation"] = relation
     event["anchor_frame"] = anchor_frame
-    event["frame"] = int(event["start_frame"])
     return event
 
 
@@ -167,7 +196,137 @@ def get_tracking_frame(frame: int) -> dict[str, dict[str, float | int | None]]:
     return get_player_coordinates_for_frame(target_frame=frame)
 
 
-def get_player_coordinates_for_frame(target_frame: int) -> dict[str, dict[str, float | int | None]]:
+def get_tracking_window(
+    start_frame: int,
+    end_frame: int,
+    frame_step: int = 1,
+) -> list[dict[str, Any]]:
+    if not isinstance(start_frame, int) or not isinstance(end_frame, int):
+        raise TypeError("start_frame and end_frame must be integers.")
+
+    if not isinstance(frame_step, int):
+        raise TypeError("frame_step must be an integer.")
+
+    if frame_step < 1:
+        raise ValueError("frame_step must be 1 or greater.")
+
+    _require_file(TRACKING_PARQUET_PATH, "Tracking parquet file")
+
+    lower_frame = min(start_frame, end_frame)
+    upper_frame = max(start_frame, end_frame)
+
+    connection = _connect()
+    try:
+        coordinate_columns = _get_tracking_coordinate_columns(connection)
+        select_clause = ", ".join(f'"{column_name}"' for column_name in coordinate_columns)
+        query = f"""
+            SELECT "Frame", {select_clause}
+            FROM read_parquet(?)
+            WHERE "Frame" BETWEEN ? AND ?
+            ORDER BY "Frame" ASC
+        """
+        rows = connection.execute(
+            query,
+            [str(TRACKING_PARQUET_PATH), lower_frame, upper_frame],
+        ).fetchall()
+
+        window_frames: list[dict[str, Any]] = []
+        for row in rows:
+            frame = int(row[0])
+            if (frame - lower_frame) % frame_step != 0:
+                continue
+
+            coordinates = _build_coordinate_map(coordinate_columns, row[1:])
+            window_frames.append(
+                {
+                    "frame": frame,
+                    "coordinates": coordinates,
+                }
+            )
+
+        return window_frames
+    finally:
+        connection.close()
+
+
+def get_event_tracking_window(
+    event_frame: int,
+    frames_before: int = FRAMES_PER_SECOND * 5,
+    frames_after: int = FRAMES_PER_SECOND * 2,
+    frame_step: int = 1,
+) -> dict[str, Any]:
+    if not isinstance(event_frame, int):
+        raise TypeError("event_frame must be an integer.")
+
+    if frames_before < 0 or frames_after < 0:
+        raise ValueError("frames_before and frames_after must be 0 or greater.")
+
+    start_frame = max(1, event_frame - frames_before)
+    end_frame = max(start_frame, event_frame + frames_after)
+    frames = get_tracking_window(start_frame=start_frame, end_frame=end_frame, frame_step=frame_step)
+    events = get_events_in_window(start_frame=start_frame, end_frame=end_frame)
+
+    return {
+        "event_frame": event_frame,
+        "start_frame": start_frame,
+        "end_frame": end_frame,
+        "frame_step": frame_step,
+        "frames_per_second": FRAMES_PER_SECOND,
+        "frames": frames,
+        "events": events,
+    }
+
+
+def get_events_in_window(start_frame: int, end_frame: int, limit: int = 24) -> list[dict[str, Any]]:
+    if not isinstance(start_frame, int) or not isinstance(end_frame, int):
+        raise TypeError("start_frame and end_frame must be integers.")
+
+    if not isinstance(limit, int):
+        raise TypeError("limit must be an integer.")
+
+    if limit < 1:
+        raise ValueError("limit must be 1 or greater.")
+
+    _require_file(EVENTS_PARQUET_PATH, "Events parquet file")
+
+    lower_frame = min(start_frame, end_frame)
+    upper_frame = max(start_frame, end_frame)
+
+    query = """
+        SELECT
+            "Team",
+            "Type",
+            "Subtype",
+            "Period",
+            "Start Frame",
+            "Start Time [s]",
+            "End Frame",
+            "End Time [s]",
+            "From",
+            "To",
+            "Start X",
+            "Start Y",
+            "End X",
+            "End Y"
+        FROM read_parquet(?)
+        WHERE "Start Frame" BETWEEN ? AND ?
+        ORDER BY "Start Frame" ASC
+        LIMIT ?
+    """
+
+    connection = _connect()
+    try:
+        rows = connection.execute(
+            query,
+            [str(EVENTS_PARQUET_PATH), lower_frame, upper_frame, limit],
+        ).fetchall()
+    finally:
+        connection.close()
+
+    return [_build_event_dict(row) for row in rows]
+
+
+def get_player_coordinates_for_frame(target_frame: int) -> CoordinateMap:
     if not isinstance(target_frame, int):
         raise TypeError("target_frame must be an integer.")
 
@@ -175,17 +334,7 @@ def get_player_coordinates_for_frame(target_frame: int) -> dict[str, dict[str, f
 
     connection = _connect()
     try:
-        columns_info = connection.execute(
-            "DESCRIBE SELECT * FROM read_parquet(?)",
-            [str(TRACKING_PARQUET_PATH)],
-        ).fetchall()
-
-        coordinate_columns = [
-            column_name
-            for column_name, *_ in columns_info
-            if column_name.endswith("_x") or column_name.endswith("_y")
-        ]
-
+        coordinate_columns = _get_tracking_coordinate_columns(connection)
         select_clause = ", ".join(f'"{column_name}"' for column_name in coordinate_columns)
         query = f"""
             SELECT {select_clause}
@@ -197,12 +346,7 @@ def get_player_coordinates_for_frame(target_frame: int) -> dict[str, dict[str, f
         if row is None:
             return {}
 
-        result: dict[str, dict[str, float | int | None]] = {}
-        for column_name, value in zip(coordinate_columns, row):
-            player_name, axis = column_name.rsplit("_", 1)
-            result.setdefault(player_name, {})[axis] = value
-
-        return result
+        return _build_coordinate_map(coordinate_columns, row)
     finally:
         connection.close()
 
@@ -211,8 +355,10 @@ if __name__ == "__main__":
     start = time.perf_counter()
     first_away_shot = find_event(event_type="SHOT", team="Away", occurrence=1)
     coordinates = get_tracking_frame(first_away_shot["frame"])
+    sequence = get_event_tracking_window(first_away_shot["frame"])
     elapsed = time.perf_counter() - start
 
     print(first_away_shot)
     print(coordinates)
+    print(f"Sequence frames fetched: {len(sequence['frames'])}")
     print(f"Execution time: {elapsed:.6f} seconds")

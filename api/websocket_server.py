@@ -42,6 +42,7 @@ def _build_render_message(analysis_result: dict[str, Any]) -> dict[str, Any]:
         "payload": {
             "view": "PITCH_HOME",
             "data": analysis_result["coordinates"],
+            "sequence": analysis_result.get("sequence"),
             "context": analysis_result["context"],
         },
     }

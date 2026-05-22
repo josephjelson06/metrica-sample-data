@@ -8,7 +8,7 @@ import websockets
 async def main() -> None:
     uri = "ws://localhost:8000/ws/analysis"
     async with websockets.connect(uri) as websocket:
-        await websocket.send("Give me the coordinates for minute 5")
+        await websocket.send("Show me the away team's second corner")
         response = await websocket.recv()
         print(response)
 

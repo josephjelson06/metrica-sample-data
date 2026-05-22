@@ -16,12 +16,15 @@ type AnalysisStore = {
   isPlaying: boolean;
   playbackStep: number;
   playbackIntervalMs: number;
+  sequenceFrameIndex: number;
   setQuery: (query: string) => void;
   connect: () => void;
   disconnect: () => void;
   sendQuery: (query: string) => void;
   requestFrame: (frame: number) => void;
   stepFrameBy: (delta: number) => void;
+  stepSequenceBy: (delta: number) => void;
+  advancePlayback: () => void;
   setPlaying: (isPlaying: boolean) => void;
   togglePlayback: () => void;
 };
@@ -48,6 +51,7 @@ export const useAnalysisStore = create<AnalysisStore>((set, get) => ({
   isPlaying: false,
   playbackStep: 25,
   playbackIntervalMs: 250,
+  sequenceFrameIndex: 0,
 
   setQuery: (query) => set({ query }),
 
@@ -72,6 +76,7 @@ export const useAnalysisStore = create<AnalysisStore>((set, get) => ({
     socket.addEventListener("close", () => {
       set((state) => ({
         status: "idle",
+        isPlaying: false,
         socket: state.socket === socket ? null : state.socket,
       }));
     });
@@ -86,15 +91,19 @@ export const useAnalysisStore = create<AnalysisStore>((set, get) => ({
       if (message.type === "ERROR") {
         set({
           errorMessage: message.payload.message,
+          isPlaying: false,
           status: "error",
         });
         return;
       }
 
+      const incomingSequence = message.payload.sequence;
       set({
         latestPayload: message.payload,
         errorMessage: null,
         status: "connected",
+        sequenceFrameIndex: 0,
+        isPlaying: Boolean(incomingSequence && incomingSequence.frames.length > 1),
       });
     });
 
@@ -102,11 +111,15 @@ export const useAnalysisStore = create<AnalysisStore>((set, get) => ({
   },
 
   disconnect: () => {
-    const currentSocket = get().socket;
+    const currentState = get();
+    const currentSocket = currentState.socket;
     if (currentSocket) {
       currentSocket.close();
     }
-    set({ socket: null, status: "idle" });
+
+    if (currentSocket || currentState.status !== "idle" || currentState.isPlaying) {
+      set({ socket: null, status: "idle", isPlaying: false });
+    }
   },
 
   sendQuery: (query) => {
@@ -117,7 +130,7 @@ export const useAnalysisStore = create<AnalysisStore>((set, get) => ({
     }
 
     currentSocket.send(JSON.stringify({ query }));
-    set({ status: "connected", errorMessage: null, query });
+    set({ status: "connected", errorMessage: null, query, isPlaying: false });
   },
 
   requestFrame: (frame) => {
@@ -129,6 +142,36 @@ export const useAnalysisStore = create<AnalysisStore>((set, get) => ({
   stepFrameBy: (delta) => {
     const currentFrame = get().latestPayload?.context.frame ?? 1;
     get().requestFrame(currentFrame + delta);
+  },
+
+  stepSequenceBy: (delta) => {
+    const sequenceFrames = get().latestPayload?.sequence?.frames ?? [];
+    if (sequenceFrames.length === 0) {
+      return;
+    }
+
+    set((state) => {
+      const lastIndex = sequenceFrames.length - 1;
+      const nextIndex = Math.max(0, Math.min(state.sequenceFrameIndex + delta, lastIndex));
+      return {
+        sequenceFrameIndex: nextIndex,
+      };
+    });
+  },
+
+  advancePlayback: () => {
+    const sequenceFrames = get().latestPayload?.sequence?.frames ?? [];
+    if (sequenceFrames.length > 1) {
+      set((state) => {
+        const nextIndex = state.sequenceFrameIndex + 1;
+        return {
+          sequenceFrameIndex: nextIndex >= sequenceFrames.length ? 0 : nextIndex,
+        };
+      });
+      return;
+    }
+
+    get().stepFrameBy(get().playbackStep);
   },
 
   setPlaying: (isPlaying) => set({ isPlaying }),

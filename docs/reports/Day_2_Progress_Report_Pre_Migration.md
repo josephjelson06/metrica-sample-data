@@ -384,3 +384,146 @@ At this point, the system has:
 - a migrated Next.js + TypeScript frontend with canvas rendering
 
 So Day 2 is now complete both in backend intelligence and in frontend migration readiness.
+
+## 16. Sequence Replay Upgrade
+
+After the earlier event-aware backend work, the system was upgraded from single-frame event lookup into short replay-window retrieval.
+
+### What changed
+
+The backend can now return:
+
+- one resolved event frame
+- a window of tracking frames around that event
+- nearby events inside that same replay window
+
+This means the system can now answer event questions with a short tactical clip, not only a frozen snapshot.
+
+### Why this mattered
+
+This was the point where the project stopped being only:
+
+- `find one frame`
+
+and started becoming:
+
+- `show the football moment as a sequence`
+
+## 17. Replay Timeline And Event Markers
+
+The newer frontend work added a clearer replay timeline experience.
+
+### Improvements added
+
+- sequence playback controls
+- clip scrubbing
+- visible event markers inside the replay strip
+- event chips with readable labels and times
+- event-frame highlighting inside the clip
+
+This makes it much easier to explain:
+
+- where the clip starts
+- where the main event happens
+- what other events happen near that main moment
+
+## 18. Smoother Playback Added
+
+The pitch renderer was upgraded so replay frames no longer only jump from point to point.
+
+### Improvement added
+
+- interpolation between frames using canvas animation
+
+### Why this mattered
+
+Instead of watching players snap from one position to another, the replay now feels more like motion.
+
+This is a small but important step toward a real tactical replay experience.
+
+## 19. Tactical Visual Overlays Added
+
+The frontend now contains the first tactical visual overlays beyond raw coordinates.
+
+### Team convex hulls added
+
+The pitch renderer now draws:
+
+- a shaded hull for the Home team
+- a shaded hull for the Away team
+
+This helps visualize:
+
+- team shape
+- compactness
+- spatial spread
+
+### Event direction arrows added
+
+The pitch renderer also now draws nearby directional event vectors for replay moments such as:
+
+- passes
+- shots
+- set pieces
+
+These arrows use event start and end coordinates and help show:
+
+- ball direction
+- attacking intent
+- local sequence flow
+
+## 20. Documentation Layer Strengthened
+
+The project gained a deeper strategic explanation document:
+
+- [Football_Intelligence_System_Design_Map.md](C:/Users/josep/OneDrive/Desktop/sample-data/docs/guides/Football_Intelligence_System_Design_Map.md)
+
+This guide explains:
+
+- why the system is being built in capability levels
+- how infinite football questions map to finite internal capabilities
+- what the LLM should do
+- what the data and tool layers should do
+- why this is a football intelligence system, not only a simple AI agent
+
+The guide was also linked from:
+
+- [README.md](C:/Users/josep/OneDrive/Desktop/sample-data/README.md)
+- [Project_Explanation_Guide.md](C:/Users/josep/OneDrive/Desktop/sample-data/docs/guides/Project_Explanation_Guide.md)
+
+## 21. Frontend Stability Fixes
+
+During later frontend work, we fixed a runtime issue caused by repeated state updates during connection cleanup.
+
+### Stability improvements added
+
+- the websocket disconnect flow was made safer
+- the workspace mount/unmount lifecycle was tightened
+- local fallback font stacks replaced online Google font fetching for more reliable offline builds
+
+### Validation
+
+The Next.js app now builds successfully in the local environment after these fixes.
+
+## 22. Updated Overall Day 2 Meaning
+
+With all additions included, Day 2 is no longer only about:
+
+- event-aware frame retrieval
+
+It now also includes:
+
+- replay-window retrieval
+- replay timeline understanding
+- nearby event context inside clips
+- smoother playback
+- first tactical overlays
+- stronger project-level explanation documents
+
+So the project has moved from:
+
+- `AI finds the correct frame`
+
+to:
+
+- `AI finds the correct football moment and the system can now show how that moment unfolds`

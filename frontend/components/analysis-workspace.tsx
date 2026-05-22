@@ -4,6 +4,7 @@ import { startTransition, useDeferredValue, useEffect, useEffectEvent } from "re
 
 import { PitchCanvas } from "@/components/pitch-canvas";
 import { useAnalysisStore } from "@/lib/analysis-store";
+import type { SequenceEvent } from "@/lib/types";
 
 function getStatusLabel(status: ReturnType<typeof useAnalysisStore.getState>["status"]) {
   if (status === "connected") {
@@ -21,41 +22,91 @@ function getStatusLabel(status: ReturnType<typeof useAnalysisStore.getState>["st
   return "Idle";
 }
 
-export function AnalysisWorkspace() {
-  const {
-    status,
-    query,
-    latestPayload,
-    errorMessage,
-    isPlaying,
-    playbackIntervalMs,
-    playbackStep,
-    connect,
-    disconnect,
-    sendQuery,
-    requestFrame,
-    stepFrameBy,
-    setQuery,
-    togglePlayback,
-    setPlaying,
-  } = useAnalysisStore();
+function formatClockFromFrame(frame: number, framesPerSecond: number) {
+  const totalSeconds = Math.max(0, Math.floor(frame / Math.max(framesPerSecond, 1)));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
 
-  const connectOnMount = useEffectEvent(() => {
-    connect();
-  });
+function getSequenceEventColor(event: SequenceEvent) {
+  const upperType = event.type.toUpperCase();
+  if (upperType === "SHOT") {
+    return "#d75b1f";
+  }
+  if (upperType === "PASS") {
+    return "#2f7d45";
+  }
+  if (upperType === "SET PIECE") {
+    return "#1b365c";
+  }
+  if (upperType === "CARD") {
+    return "#b38a15";
+  }
+  return "#425443";
+}
+
+function getSequenceEventLabel(event: SequenceEvent) {
+  if (event.subtype) {
+    return `${event.type} / ${event.subtype}`;
+  }
+  return event.type;
+}
+
+export function AnalysisWorkspace() {
+  const status = useAnalysisStore((state) => state.status);
+  const query = useAnalysisStore((state) => state.query);
+  const latestPayload = useAnalysisStore((state) => state.latestPayload);
+  const errorMessage = useAnalysisStore((state) => state.errorMessage);
+  const isPlaying = useAnalysisStore((state) => state.isPlaying);
+  const playbackIntervalMs = useAnalysisStore((state) => state.playbackIntervalMs);
+  const playbackStep = useAnalysisStore((state) => state.playbackStep);
+  const sequenceFrameIndex = useAnalysisStore((state) => state.sequenceFrameIndex);
+  const sendQuery = useAnalysisStore((state) => state.sendQuery);
+  const requestFrame = useAnalysisStore((state) => state.requestFrame);
+  const stepFrameBy = useAnalysisStore((state) => state.stepFrameBy);
+  const stepSequenceBy = useAnalysisStore((state) => state.stepSequenceBy);
+  const advancePlaybackInStore = useAnalysisStore((state) => state.advancePlayback);
+  const setQuery = useAnalysisStore((state) => state.setQuery);
+  const togglePlayback = useAnalysisStore((state) => state.togglePlayback);
+  const setPlaying = useAnalysisStore((state) => state.setPlaying);
+
+  const activeSequenceFrame = latestPayload?.sequence?.frames[sequenceFrameIndex] ?? null;
+  const displayedCoordinates = activeSequenceFrame?.coordinates ?? latestPayload?.data ?? null;
+  const displayedFrame = activeSequenceFrame?.frame ?? latestPayload?.context.frame ?? 1;
+  const deferredCoordinates = useDeferredValue(displayedCoordinates);
+  const eventContext = latestPayload?.context.event;
+  const frame = latestPayload?.context.frame;
+  const activeFrame = displayedFrame;
+  const sequence = latestPayload?.sequence ?? null;
+  const hasSequence = Boolean(sequence && sequence.frames.length > 0);
+  const replaySequence = hasSequence ? sequence : null;
+  const clipProgressPercent = hasSequence && sequence && sequence.frames.length > 1
+    ? (sequenceFrameIndex / (sequence.frames.length - 1)) * 100
+    : 0;
+  const eventProgressPercent = hasSequence && sequence
+    ? ((sequence.event_frame - sequence.start_frame) / Math.max(sequence.end_frame - sequence.start_frame, 1)) * 100
+    : 0;
+  const pitchTransitionMs = hasSequence && sequence
+    ? Math.max(20, Math.round(1000 / Math.max(sequence.frames_per_second, 1)))
+    : 180;
+  const sequenceEvents = replaySequence?.events ?? [];
 
   useEffect(() => {
-    connectOnMount();
-    return () => disconnect();
-  }, [connectOnMount, disconnect]);
+    const { connect, disconnect } = useAnalysisStore.getState();
+    connect();
+    return () => {
+      disconnect();
+    };
+  }, []);
 
-  const advancePlayback = useEffectEvent(() => {
+  const advancePlaybackTick = useEffectEvent(() => {
     if (status !== "connected") {
       setPlaying(false);
       return;
     }
 
-    stepFrameBy(playbackStep);
+    advancePlaybackInStore();
   });
 
   useEffect(() => {
@@ -64,16 +115,11 @@ export function AnalysisWorkspace() {
     }
 
     const timer = window.setInterval(() => {
-      advancePlayback();
-    }, playbackIntervalMs);
+      advancePlaybackTick();
+    }, hasSequence ? Math.max(16, Math.round(1000 / (sequence?.frames_per_second ?? 25))) : playbackIntervalMs);
 
     return () => window.clearInterval(timer);
-  }, [advancePlayback, isPlaying, playbackIntervalMs]);
-
-  const deferredPayload = useDeferredValue(latestPayload);
-  const eventContext = latestPayload?.context.event;
-  const frame = latestPayload?.context.frame;
-  const activeFrame = frame ?? 1;
+  }, [advancePlaybackTick, hasSequence, isPlaying, playbackIntervalMs, sequence]);
 
   return (
     <main
@@ -186,7 +232,7 @@ export function AnalysisWorkspace() {
             type="range"
             min={1}
             max={141156}
-            step={25}
+            step={hasSequence ? 1 : 25}
             value={activeFrame}
             onChange={(event) => {
               const nextFrame = Number(event.target.value);
@@ -194,10 +240,151 @@ export function AnalysisWorkspace() {
             }}
           />
 
+          {replaySequence ? (
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, color: "var(--muted)", fontSize: 14 }}>
+                <span>Sequence replay</span>
+                <span>
+                  Clip frame {sequenceFrameIndex + 1} / {replaySequence.frames.length}
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={Math.max(replaySequence.frames.length - 1, 0)}
+                step={1}
+                value={sequenceFrameIndex}
+                onChange={(event) => {
+                  const nextIndex = Number(event.target.value);
+                  startTransition(() => {
+                    const delta = nextIndex - sequenceFrameIndex;
+                    stepSequenceBy(delta);
+                  });
+                }}
+              />
+              <div
+                style={{
+                  position: "relative",
+                  height: 12,
+                  borderRadius: 999,
+                  overflow: "hidden",
+                  background: "rgba(25, 42, 29, 0.12)",
+                }}
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    background: "linear-gradient(90deg, rgba(35,69,47,0.12), rgba(186,79,23,0.12))",
+                  }}
+                />
+                {sequenceEvents.map((sequenceEvent, index) => {
+                  const markerPercent = ((sequenceEvent.frame - replaySequence.start_frame) / Math.max(replaySequence.end_frame - replaySequence.start_frame, 1)) * 100;
+                  const isPrimaryEvent = sequenceEvent.frame === replaySequence.event_frame;
+                  return (
+                    <div
+                      key={`${sequenceEvent.frame}-${sequenceEvent.type}-${index}`}
+                      title={`${getSequenceEventLabel(sequenceEvent)} at ${formatClockFromFrame(sequenceEvent.frame, replaySequence.frames_per_second)}`}
+                      style={{
+                        position: "absolute",
+                        top: isPrimaryEvent ? -2 : 1,
+                        bottom: isPrimaryEvent ? -2 : 1,
+                        left: `calc(${Math.max(0, Math.min(markerPercent, 100))}% - 2px)`,
+                        width: isPrimaryEvent ? 4 : 3,
+                        borderRadius: 999,
+                        background: getSequenceEventColor(sequenceEvent),
+                        opacity: isPrimaryEvent ? 1 : 0.88,
+                      }}
+                    />
+                  );
+                })}
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    bottom: 0,
+                    left: `${Math.max(0, Math.min(eventProgressPercent, 100))}%`,
+                    width: 2,
+                    background: "#d75b1f",
+                    boxShadow: "0 0 0 3px rgba(215,91,31,0.15)",
+                  }}
+                />
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 1,
+                    bottom: 1,
+                    left: `calc(${Math.max(0, Math.min(clipProgressPercent, 100))}% - 6px)`,
+                    width: 12,
+                    borderRadius: 999,
+                    background: "#21472f",
+                    border: "2px solid rgba(255,248,239,0.92)",
+                    boxShadow: "0 2px 8px rgba(20,32,19,0.18)",
+                  }}
+                />
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, color: "var(--muted)", fontSize: 12 }}>
+                <span>
+                  Start {formatClockFromFrame(replaySequence.start_frame, replaySequence.frames_per_second)}
+                </span>
+                <span>
+                  Event {formatClockFromFrame(replaySequence.event_frame, replaySequence.frames_per_second)}
+                </span>
+                <span>
+                  End {formatClockFromFrame(replaySequence.end_frame, replaySequence.frames_per_second)}
+                </span>
+              </div>
+              {sequenceEvents.length > 0 ? (
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 8,
+                  }}
+                >
+                  {sequenceEvents.slice(0, 8).map((sequenceEvent, index) => (
+                    <span
+                      key={`${sequenceEvent.frame}-${sequenceEvent.type}-${index}-chip`}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        borderRadius: 999,
+                        padding: "5px 10px",
+                        background: "rgba(255,255,255,0.78)",
+                        border: "1px solid rgba(21,32,23,0.08)",
+                        color: "var(--ink)",
+                        fontSize: 12,
+                      }}
+                      title={`${getSequenceEventLabel(sequenceEvent)} at frame ${sequenceEvent.frame}`}
+                    >
+                      <span
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: 999,
+                          background: getSequenceEventColor(sequenceEvent),
+                          flex: "0 0 auto",
+                        }}
+                      />
+                      {formatClockFromFrame(sequenceEvent.frame, replaySequence.frames_per_second)} {getSequenceEventLabel(sequenceEvent)}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
             <button
               type="button"
-              onClick={() => stepFrameBy(-playbackStep)}
+              onClick={() => {
+                if (hasSequence) {
+                  stepSequenceBy(-1);
+                  return;
+                }
+                stepFrameBy(-playbackStep);
+              }}
               style={{
                 border: 0,
                 borderRadius: 999,
@@ -208,7 +395,7 @@ export function AnalysisWorkspace() {
                 cursor: "pointer",
               }}
             >
-              Previous Frame
+              {hasSequence ? "Previous Clip Frame" : "Previous Frame"}
             </button>
             <button
               type="button"
@@ -223,11 +410,17 @@ export function AnalysisWorkspace() {
                 cursor: "pointer",
               }}
             >
-              {isPlaying ? "Pause Playback" : "Play Frames"}
+              {isPlaying ? "Pause Playback" : hasSequence ? "Play Sequence" : "Play Frames"}
             </button>
             <button
               type="button"
-              onClick={() => stepFrameBy(playbackStep)}
+              onClick={() => {
+                if (hasSequence) {
+                  stepSequenceBy(1);
+                  return;
+                }
+                stepFrameBy(playbackStep);
+              }}
               style={{
                 border: 0,
                 borderRadius: 999,
@@ -238,7 +431,7 @@ export function AnalysisWorkspace() {
                 cursor: "pointer",
               }}
             >
-              Next Frame
+              {hasSequence ? "Next Clip Frame" : "Next Frame"}
             </button>
           </div>
         </div>
@@ -247,6 +440,8 @@ export function AnalysisWorkspace() {
           <span>Home: cream markers</span>
           <span>Away: orange markers</span>
           <span>Ball: black marker</span>
+          <span>Team hulls: shaded shape overlays</span>
+          <span>Event arrows: nearby pass and shot directions</span>
         </div>
 
         <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.6 }}>
@@ -288,7 +483,7 @@ export function AnalysisWorkspace() {
             Match View
           </h2>
           <p style={{ margin: 0, color: "var(--muted)", fontSize: 14 }}>
-            {latestPayload ? `${Object.keys(latestPayload.data).length} tracked entities` : "No frame loaded"}
+            {displayedCoordinates ? `${Object.keys(displayedCoordinates).length} tracked entities` : "No frame loaded"}
           </p>
         </div>
 
@@ -308,10 +503,14 @@ export function AnalysisWorkspace() {
                 {eventContext.team} {eventContext.type}
                 {eventContext.subtype ? ` / ${eventContext.subtype}` : ""}
               </strong>
-              {` at frame ${eventContext.frame}`}
+              {` at event frame ${eventContext.frame}`}
               {eventContext.start_time_s != null ? ` (${eventContext.start_time_s.toFixed(2)}s)` : ""}
               {eventContext.from_player ? `, from ${eventContext.from_player}` : ""}
-              {`. Relation: ${eventContext.relation}.`}
+              {hasSequence ? `, replaying around frame ${activeFrame}.` : "."}
+              {` Relation: ${eventContext.relation}.`}
+              {hasSequence && sequence
+                ? ` Clip window: ${formatClockFromFrame(sequence.start_frame, sequence.frames_per_second)} to ${formatClockFromFrame(sequence.end_frame, sequence.frames_per_second)}.`
+                : ""}
             </>
           ) : frame ? (
             <>
@@ -323,7 +522,13 @@ export function AnalysisWorkspace() {
           )}
         </div>
 
-        <PitchCanvas payload={deferredPayload} />
+        <PitchCanvas
+          coordinates={deferredCoordinates}
+          activeFrame={activeFrame}
+          sequenceEvents={sequenceEvents}
+          framesPerSecond={replaySequence?.frames_per_second ?? 25}
+          transitionMs={pitchTransitionMs}
+        />
       </section>
     </main>
   );

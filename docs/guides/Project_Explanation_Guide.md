@@ -11,6 +11,10 @@ You can use this document as:
 - a demo walkthrough
 - a cheat sheet while answering questions
 
+Related deeper strategy guide:
+
+- [Football Intelligence System Design Map](C:/Users/josep/OneDrive/Desktop/sample-data/docs/guides/Football_Intelligence_System_Design_Map.md)
+
 ## 1. The Simple Big Picture
 
 Before talking about files, start with the problem in one simple sentence:

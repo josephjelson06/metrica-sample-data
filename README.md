@@ -37,6 +37,7 @@ The original sample data is still here, but the workspace is now organized so it
 Useful explanation files:
 
 - [Sample Game 2 Data Guide](C:/Users/josep/OneDrive/Desktop/sample-data/docs/guides/Sample_Game_2_Data_Guide.md)
+- [Football Intelligence System Design Map](C:/Users/josep/OneDrive/Desktop/sample-data/docs/guides/Football_Intelligence_System_Design_Map.md)
 - [Day 1 Progress Report](C:/Users/josep/OneDrive/Desktop/sample-data/docs/reports/Day_1_Progress_Report.md)
 
 Useful working files:

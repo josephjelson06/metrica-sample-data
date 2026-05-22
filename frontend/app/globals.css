@@ -1,4 +1,6 @@
 :root {
+  --font-display: Georgia, "Times New Roman", Times, serif;
+  --font-ui: "Trebuchet MS", "Segoe UI", Verdana, sans-serif;
   --bg: #f0ead7;
   --bg-accent: #d7e6ce;
   --panel: rgba(250, 247, 238, 0.9);
