@@ -47,6 +47,8 @@ Rules:
 - Support period filters such as first half, second half, period 1, and period 2.
 - Support pitch zones such as attacking third, middle third, defensive third, left wing,
   right wing, central channel, and penalty box.
+- Support phase filters such as set piece, in possession, out of possession,
+  attacking transition, and defensive transition.
 - The final tool you should use for returning coordinates is always get_tracking_frame.
 """.strip()
 
@@ -97,6 +99,10 @@ TOOLS = [
                     "pitch_zone": {
                         "type": "string",
                         "description": "Optional normalized pitch zone such as attacking_third, middle_third, defensive_third, left_wing, right_wing, central_channel, or penalty_box.",
+                    },
+                    "phase": {
+                        "type": "string",
+                        "description": "Optional phase label such as set_piece, in_possession, out_of_possession, attacking_transition, or defensive_transition.",
                     },
                 },
                 "required": ["event_type"],
@@ -279,6 +285,22 @@ def _extract_aggregate_intent(user_query: str) -> str | None:
     return None
 
 
+def _extract_phase_hint(user_query: str) -> str | None:
+    phase_patterns = [
+        (r"\bset piece\b", "set_piece"),
+        (r"\bin possession\b", "in_possession"),
+        (r"\bout of possession\b", "out_of_possession"),
+        (r"\b(attacking transition|attack transition|counter(?:-|\s)?attack)\b", "attacking_transition"),
+        (r"\b(defensive transition|transition to defense|transition to defence)\b", "defensive_transition"),
+    ]
+
+    for pattern, phase in phase_patterns:
+        if re.search(pattern, user_query, flags=re.IGNORECASE):
+            return phase
+
+    return None
+
+
 def _extract_metric_hint(user_query: str) -> dict[str, Any] | None:
     metric_patterns = [
         (r"\bwidth\b", "width"),
@@ -305,6 +327,7 @@ def _extract_event_hint(user_query: str) -> dict[str, Any] | None:
     anchor_frame = _extract_frame_hint(user_query) if relation is not None else None
     period = _extract_period_hint(user_query)
     pitch_zone = _extract_pitch_zone_hint(user_query)
+    phase = _extract_phase_hint(user_query)
 
     for event_pattern in EVENT_PATTERNS:
         if re.search(event_pattern["pattern"], lower_query, flags=re.IGNORECASE):
@@ -322,12 +345,13 @@ def _extract_event_hint(user_query: str) -> dict[str, Any] | None:
                 "anchor_frame": anchor_frame,
                 "period": period,
                 "pitch_zone": pitch_zone,
+                "phase": phase,
             }
             if event_pattern["subtype_contains"]:
                 hint["subtype_contains"] = event_pattern["subtype_contains"]
             return hint
 
-    if period is not None or pitch_zone is not None:
+    if period is not None or pitch_zone is not None or phase is not None:
         return {
             "event_type": None,
             "team": _extract_team_hint(user_query),
@@ -337,6 +361,7 @@ def _extract_event_hint(user_query: str) -> dict[str, Any] | None:
             "anchor_frame": anchor_frame,
             "period": period,
             "pitch_zone": pitch_zone,
+            "phase": phase,
         }
 
     return None
@@ -350,6 +375,7 @@ def _resolve_aggregate_query(user_query: str) -> dict[str, Any] | None:
     event_hint = _extract_event_hint(user_query) or {}
     period = _extract_period_hint(user_query)
     pitch_zone = _extract_pitch_zone_hint(user_query)
+    phase = _extract_phase_hint(user_query)
 
     query_filters = {
         "event_type": event_hint.get("event_type"),
@@ -359,6 +385,7 @@ def _resolve_aggregate_query(user_query: str) -> dict[str, Any] | None:
         "anchor_frame": event_hint.get("anchor_frame"),
         "period": period if period is not None else event_hint.get("period"),
         "pitch_zone": pitch_zone if pitch_zone is not None else event_hint.get("pitch_zone"),
+        "phase": phase if phase is not None else event_hint.get("phase"),
     }
 
     if aggregate_intent == "count":
@@ -425,6 +452,8 @@ def _build_user_content(user_query: str) -> str:
             event_parts.append(f'period={event_hint["period"]}')
         if event_hint.get("pitch_zone") is not None:
             event_parts.append(f'pitch_zone="{event_hint["pitch_zone"]}"')
+        if event_hint.get("phase") is not None:
+            event_parts.append(f'phase="{event_hint["phase"]}"')
         hint_lines.append(
             "Resolved event hint: if you need an event lookup first, "
             f"call find_event with {', '.join(event_parts)}."

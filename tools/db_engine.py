@@ -13,15 +13,24 @@ TRACKING_PARQUET_PATH = PROJECT_ROOT / "data" / "parquet" / "metrica_tracking.pa
 EVENTS_PARQUET_PATH = PROJECT_ROOT / "data" / "parquet" / "metrica_events.parquet"
 FRAMES_PER_SECOND = 25
 DEFAULT_EVENT_LIST_LIMIT = 25
+TRANSITION_WINDOW_SECONDS = 5.0
 
 PITCH_ZONE_SQL = {
-    "attacking_third": '"Start X" >= 0.6666666667',
-    "middle_third": '"Start X" >= 0.3333333333 AND "Start X" < 0.6666666667',
-    "defensive_third": '"Start X" < 0.3333333333',
-    "left_wing": '"Start Y" < 0.22',
-    "right_wing": '"Start Y" > 0.78',
-    "central_channel": '"Start Y" >= 0.33 AND "Start Y" <= 0.67',
-    "penalty_box": '(("Start X" <= 0.1571428571 OR "Start X" >= 0.8428571429) AND "Start Y" >= 0.2058823529 AND "Start Y" <= 0.7941176471)',
+    "attacking_third": "start_x >= 0.6666666667",
+    "middle_third": "start_x >= 0.3333333333 AND start_x < 0.6666666667",
+    "defensive_third": "start_x < 0.3333333333",
+    "left_wing": "start_y < 0.22",
+    "right_wing": "start_y > 0.78",
+    "central_channel": "start_y >= 0.33 AND start_y <= 0.67",
+    "penalty_box": "((start_x <= 0.1571428571 OR start_x >= 0.8428571429) AND start_y >= 0.2058823529 AND start_y <= 0.7941176471)",
+}
+
+PHASE_LABELS = {
+    "set_piece",
+    "in_possession",
+    "out_of_possession",
+    "attacking_transition",
+    "defensive_transition",
 }
 
 CoordinateValue = float | int | None
@@ -75,9 +84,53 @@ def _build_event_dict(row: tuple[Any, ...]) -> dict[str, Any]:
         "end_x",
         "end_y",
     ]
+    if len(row) == len(columns) + 1:
+        columns.append("phase")
     event = dict(zip(columns, row))
     event["frame"] = int(event["start_frame"])
     return event
+
+
+def _event_source_sql() -> str:
+    return f"""
+        SELECT
+            "Team" AS team,
+            "Type" AS type,
+            "Subtype" AS subtype,
+            "Period" AS period,
+            "Start Frame" AS start_frame,
+            "Start Time [s]" AS start_time_s,
+            "End Frame" AS end_frame,
+            "End Time [s]" AS end_time_s,
+            "From" AS from_player,
+            "To" AS to_player,
+            "Start X" AS start_x,
+            "Start Y" AS start_y,
+            "End X" AS end_x,
+            "End Y" AS end_y,
+            CASE
+                WHEN "Type" = 'SET PIECE' THEN 'set_piece'
+                WHEN "Type" IN ('BALL LOST', 'BALL OUT') THEN 'defensive_transition'
+                WHEN "Type" = 'RECOVERY' THEN 'attacking_transition'
+                WHEN "Type" IN ('PASS', 'SHOT')
+                    AND (
+                        ("Team" = prev_team AND prev_type = 'RECOVERY')
+                        OR ("Team" <> prev_team AND prev_type IN ('BALL LOST', 'BALL OUT'))
+                    )
+                    AND ("Start Time [s]" - COALESCE(prev_start_time_s, "Start Time [s]")) <= {TRANSITION_WINDOW_SECONDS}
+                    THEN 'attacking_transition'
+                WHEN "Type" IN ('CHALLENGE', 'FAULT RECEIVED', 'CARD') THEN 'out_of_possession'
+                ELSE 'in_possession'
+            END AS phase
+        FROM (
+            SELECT
+                *,
+                LAG("Team") OVER (ORDER BY "Period", "Start Frame") AS prev_team,
+                LAG("Type") OVER (ORDER BY "Period", "Start Frame") AS prev_type,
+                LAG("Start Time [s]") OVER (ORDER BY "Period", "Start Frame") AS prev_start_time_s
+            FROM read_parquet(?)
+        ) event_rows
+    """
 
 
 def _extract_team_points(coordinates: CoordinateMap, team: str) -> list[CoordinatePoint]:
@@ -209,6 +262,21 @@ def _normalize_pitch_zone(pitch_zone: str | None) -> str | None:
     return normalized_zone
 
 
+def _normalize_phase_label(phase: str | None) -> str | None:
+    if phase is None:
+        return None
+
+    normalized_phase = str(phase).strip().lower().replace(" ", "_")
+    if not normalized_phase:
+        return None
+
+    if normalized_phase not in PHASE_LABELS:
+        valid_phases = ", ".join(sorted(PHASE_LABELS))
+        raise ValueError(f"phase must be one of: {valid_phases}.")
+
+    return normalized_phase
+
+
 def _build_event_where_clause(
     *,
     event_type: str | None = None,
@@ -218,6 +286,7 @@ def _build_event_where_clause(
     anchor_frame: int | None = None,
     period: int | None = None,
     pitch_zone: str | None = None,
+    phase: str | None = None,
 ) -> tuple[list[str], list[Any]]:
     relation = str(relation).strip().lower()
     if relation not in {"exact", "before", "after", "around"}:
@@ -230,32 +299,37 @@ def _build_event_where_clause(
     params: list[Any] = []
 
     if event_type and str(event_type).strip():
-        filters.append('UPPER("Type") = UPPER(?)')
+        filters.append("UPPER(type) = UPPER(?)")
         params.append(str(event_type).strip())
 
     if team and str(team).strip():
-        filters.append('UPPER("Team") = UPPER(?)')
+        filters.append("UPPER(team) = UPPER(?)")
         params.append(str(team).strip())
 
     if subtype_contains and str(subtype_contains).strip():
-        filters.append('UPPER(COALESCE("Subtype", \'\')) LIKE UPPER(?)')
+        filters.append("UPPER(COALESCE(subtype, '')) LIKE UPPER(?)")
         params.append(f"%{str(subtype_contains).strip()}%")
 
     if period is not None:
         if not isinstance(period, int):
             raise TypeError("period must be an integer when provided.")
-        filters.append('"Period" = ?')
+        filters.append("period = ?")
         params.append(period)
 
     normalized_zone = _normalize_pitch_zone(pitch_zone)
     if normalized_zone is not None:
         filters.append(PITCH_ZONE_SQL[normalized_zone])
 
+    normalized_phase = _normalize_phase_label(phase)
+    if normalized_phase is not None:
+        filters.append("phase = ?")
+        params.append(normalized_phase)
+
     if relation == "before":
-        filters.append('"Start Frame" < ?')
+        filters.append("start_frame < ?")
         params.append(anchor_frame)
     elif relation == "after":
-        filters.append('"Start Frame" > ?')
+        filters.append("start_frame > ?")
         params.append(anchor_frame)
 
     return filters, params
@@ -263,10 +337,10 @@ def _build_event_where_clause(
 
 def _build_event_order_by_clause(relation: str, order: str) -> str:
     if relation == "around":
-        return 'ABS("Start Frame" - ?) ASC, "Period" ASC, "Start Frame" ASC'
+        return "ABS(start_frame - ?) ASC, period ASC, start_frame ASC"
     if relation == "before" or order == "last":
-        return '"Period" DESC, "Start Frame" DESC'
-    return '"Period" ASC, "Start Frame" ASC'
+        return "period DESC, start_frame DESC"
+    return "period ASC, start_frame ASC"
 
 
 def find_event(
@@ -279,6 +353,7 @@ def find_event(
     anchor_frame: int | None = None,
     period: int | None = None,
     pitch_zone: str | None = None,
+    phase: str | None = None,
 ) -> dict[str, Any]:
     if not event_type or not str(event_type).strip():
         raise ValueError("event_type must be a non-empty string.")
@@ -301,6 +376,7 @@ def find_event(
         anchor_frame=anchor_frame,
         period=period,
         pitch_zone=pitch_zone,
+        phase=phase,
     )
     order_by_clause = _build_event_order_by_clause(relation=relation, order=order)
     if relation == "around":
@@ -308,21 +384,22 @@ def find_event(
 
     query = f"""
         SELECT
-            "Team",
-            "Type",
-            "Subtype",
-            "Period",
-            "Start Frame",
-            "Start Time [s]",
-            "End Frame",
-            "End Time [s]",
-            "From",
-            "To",
-            "Start X",
-            "Start Y",
-            "End X",
-            "End Y"
-        FROM read_parquet(?)
+            team,
+            type,
+            subtype,
+            period,
+            start_frame,
+            start_time_s,
+            end_frame,
+            end_time_s,
+            from_player,
+            to_player,
+            start_x,
+            start_y,
+            end_x,
+            end_y,
+            phase
+        FROM ({_event_source_sql()}) AS event_rows
         WHERE {" AND ".join(filters)}
         ORDER BY {order_by_clause}
         LIMIT 1 OFFSET ?
@@ -346,6 +423,7 @@ def find_event(
             "anchor_frame": anchor_frame,
             "period": period,
             "pitch_zone": pitch_zone,
+            "phase": phase,
         }
         raise ValueError(f"No matching event found for {filters_used}.")
 
@@ -356,6 +434,7 @@ def find_event(
     event["anchor_frame"] = anchor_frame
     event["period_filter"] = period
     event["pitch_zone"] = _normalize_pitch_zone(pitch_zone)
+    event["phase_filter"] = _normalize_phase_label(phase)
     return event
 
 
@@ -369,6 +448,7 @@ def find_event_frame(
     anchor_frame: int | None = None,
     period: int | None = None,
     pitch_zone: str | None = None,
+    phase: str | None = None,
 ) -> int:
     event = find_event(
         event_type=event_type,
@@ -380,6 +460,7 @@ def find_event_frame(
         anchor_frame=anchor_frame,
         period=period,
         pitch_zone=pitch_zone,
+        phase=phase,
     )
     return int(event["frame"])
 
@@ -392,6 +473,7 @@ def list_events(
     anchor_frame: int | None = None,
     period: int | None = None,
     pitch_zone: str | None = None,
+    phase: str | None = None,
     limit: int = DEFAULT_EVENT_LIST_LIMIT,
 ) -> list[dict[str, Any]]:
     if not isinstance(limit, int):
@@ -410,6 +492,7 @@ def list_events(
         anchor_frame=anchor_frame,
         period=period,
         pitch_zone=pitch_zone,
+        phase=phase,
     )
     order_by_clause = _build_event_order_by_clause(relation=relation, order="first")
     if relation == "around":
@@ -418,21 +501,22 @@ def list_events(
     where_clause = " AND ".join(filters) if filters else "1=1"
     query = f"""
         SELECT
-            "Team",
-            "Type",
-            "Subtype",
-            "Period",
-            "Start Frame",
-            "Start Time [s]",
-            "End Frame",
-            "End Time [s]",
-            "From",
-            "To",
-            "Start X",
-            "Start Y",
-            "End X",
-            "End Y"
-        FROM read_parquet(?)
+            team,
+            type,
+            subtype,
+            period,
+            start_frame,
+            start_time_s,
+            end_frame,
+            end_time_s,
+            from_player,
+            to_player,
+            start_x,
+            start_y,
+            end_x,
+            end_y,
+            phase
+        FROM ({_event_source_sql()}) AS event_rows
         WHERE {where_clause}
         ORDER BY {order_by_clause}
         LIMIT ?
@@ -449,9 +533,11 @@ def list_events(
 
     events = [_build_event_dict(row) for row in rows]
     normalized_zone = _normalize_pitch_zone(pitch_zone)
+    normalized_phase = _normalize_phase_label(phase)
     for event in events:
         event["period_filter"] = period
         event["pitch_zone"] = normalized_zone
+        event["phase_filter"] = normalized_phase
     return events
 
 
@@ -463,6 +549,7 @@ def count_events(
     anchor_frame: int | None = None,
     period: int | None = None,
     pitch_zone: str | None = None,
+    phase: str | None = None,
 ) -> int:
     _require_file(EVENTS_PARQUET_PATH, "Events parquet file")
 
@@ -474,12 +561,13 @@ def count_events(
         anchor_frame=anchor_frame,
         period=period,
         pitch_zone=pitch_zone,
+        phase=phase,
     )
     where_clause = " AND ".join(filters) if filters else "1=1"
 
     query = f"""
         SELECT COUNT(*)
-        FROM read_parquet(?)
+        FROM ({_event_source_sql()}) AS event_rows
         WHERE {where_clause}
     """
 
@@ -597,25 +685,26 @@ def get_events_in_window(start_frame: int, end_frame: int, limit: int = 24) -> l
 
     query = """
         SELECT
-            "Team",
-            "Type",
-            "Subtype",
-            "Period",
-            "Start Frame",
-            "Start Time [s]",
-            "End Frame",
-            "End Time [s]",
-            "From",
-            "To",
-            "Start X",
-            "Start Y",
-            "End X",
-            "End Y"
-        FROM read_parquet(?)
-        WHERE "Start Frame" BETWEEN ? AND ?
-        ORDER BY "Start Frame" ASC
+            team,
+            type,
+            subtype,
+            period,
+            start_frame,
+            start_time_s,
+            end_frame,
+            end_time_s,
+            from_player,
+            to_player,
+            start_x,
+            start_y,
+            end_x,
+            end_y,
+            phase
+        FROM ({event_source_sql}) AS event_rows
+        WHERE start_frame BETWEEN ? AND ?
+        ORDER BY start_frame ASC
         LIMIT ?
-    """
+    """.format(event_source_sql=_event_source_sql())
 
     connection = _connect()
     try:
