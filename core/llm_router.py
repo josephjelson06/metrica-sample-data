@@ -321,6 +321,32 @@ def _extract_metric_hint(user_query: str) -> dict[str, Any] | None:
     return None
 
 
+def _extract_sequence_event_query(user_query: str) -> dict[str, Any] | None:
+    sequence_match = re.search(r"\b(after|before)\b", user_query, flags=re.IGNORECASE)
+    if sequence_match is None:
+        return None
+
+    relation = sequence_match.group(1).lower()
+    target_segment = user_query[: sequence_match.start()].strip(" ,.")
+    anchor_segment = user_query[sequence_match.end() :].strip(" ,.")
+    if not target_segment or not anchor_segment:
+        return None
+
+    target_hint = _extract_event_hint(target_segment)
+    anchor_hint = _extract_event_hint(anchor_segment)
+    if target_hint is None or anchor_hint is None:
+        return None
+
+    if target_hint.get("event_type") is None or anchor_hint.get("event_type") is None:
+        return None
+
+    return {
+        "relation": relation,
+        "target": target_hint,
+        "anchor": anchor_hint,
+    }
+
+
 def _extract_event_hint(user_query: str) -> dict[str, Any] | None:
     lower_query = user_query.lower()
     relation = _extract_relation_hint(user_query)
@@ -496,6 +522,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
     frame_hint = _extract_frame_hint(user_query)
     event_hint = _extract_event_hint(user_query)
     metric_hint = _extract_metric_hint(user_query)
+    sequence_hint = _extract_sequence_event_query(user_query)
     if frame_hint is not None and (event_hint is None or event_hint.get("event_type") is None):
         tracking_result = get_tracking_frame(frame_hint)
         metrics_result: dict[str, Any] | None = None
@@ -513,6 +540,55 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 "event": None,
                 "metrics": metrics_result,
                 "mode": "frame",
+            },
+        }
+
+    if sequence_hint is not None:
+        anchor_hint = dict(sequence_hint["anchor"])
+        target_hint = dict(sequence_hint["target"])
+        anchor_event = find_event(
+            event_type=anchor_hint["event_type"],
+            team=anchor_hint.get("team"),
+            subtype_contains=anchor_hint.get("subtype_contains"),
+            occurrence=anchor_hint.get("occurrence", 1),
+            order=anchor_hint.get("order", "first"),
+            relation=anchor_hint.get("relation", "exact"),
+            anchor_frame=anchor_hint.get("anchor_frame"),
+            period=anchor_hint.get("period"),
+            pitch_zone=anchor_hint.get("pitch_zone"),
+            phase=anchor_hint.get("phase"),
+        )
+        target_event = find_event(
+            event_type=target_hint["event_type"],
+            team=target_hint.get("team"),
+            subtype_contains=target_hint.get("subtype_contains"),
+            occurrence=target_hint.get("occurrence", 1),
+            order=target_hint.get("order", "first"),
+            relation=sequence_hint["relation"],
+            anchor_frame=int(anchor_event["frame"]),
+            period=target_hint.get("period"),
+            pitch_zone=target_hint.get("pitch_zone"),
+            phase=target_hint.get("phase"),
+        )
+        resolved_frame = int(target_event["frame"])
+        tracking_result = get_tracking_frame(resolved_frame)
+        tracking_sequence = get_event_tracking_window(event_frame=resolved_frame)
+        metrics_result: dict[str, Any] | None = None
+        if metric_hint is not None:
+            metrics_result = get_frame_team_metrics(frame=resolved_frame, team=metric_hint.get("team"))
+            if metrics_result:
+                metrics_result["requested_metric"] = metric_hint["metric"]
+
+        return {
+            "coordinates": tracking_result,
+            "sequence": tracking_sequence,
+            "context": {
+                "query": user_query,
+                "frame": resolved_frame,
+                "event": target_event,
+                "anchor_event": anchor_event,
+                "metrics": metrics_result,
+                "mode": "sequence_event",
             },
         }
 
