@@ -9,7 +9,7 @@ from typing import Any
 from dotenv import load_dotenv
 from groq import Groq
 
-from tools.db_engine import find_event, get_event_tracking_window, get_tracking_frame
+from tools.db_engine import count_events, find_event, get_event_tracking_window, get_tracking_frame, list_events
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -44,6 +44,9 @@ Rules:
   - yellow card -> event_type="CARD", subtype_contains="YELLOW"
 - Support order words like first, second, third, fourth, fifth, and last.
 - Support relative lookups like before, after, and around when the user provides a time or frame.
+- Support period filters such as first half, second half, period 1, and period 2.
+- Support pitch zones such as attacking third, middle third, defensive third, left wing,
+  right wing, central channel, and penalty box.
 - The final tool you should use for returning coordinates is always get_tracking_frame.
 """.strip()
 
@@ -86,6 +89,14 @@ TOOLS = [
                     "anchor_frame": {
                         "type": "integer",
                         "description": "Reference frame for before, after, or around lookups.",
+                    },
+                    "period": {
+                        "type": "integer",
+                        "description": "Optional match period filter such as 1 or 2.",
+                    },
+                    "pitch_zone": {
+                        "type": "string",
+                        "description": "Optional normalized pitch zone such as attacking_third, middle_third, defensive_third, left_wing, right_wing, central_channel, or penalty_box.",
                     },
                 },
                 "required": ["event_type"],
@@ -131,10 +142,10 @@ EVENT_PATTERNS = [
     {"pattern": r"\byellow card\b|\bcard\b", "event_type": "CARD", "subtype_contains": "YELLOW"},
     {"pattern": r"\bgoal(?:s)?\b", "event_type": "SHOT", "subtype_contains": "GOAL"},
     {"pattern": r"\bsaved shot\b|\bshot saved\b|\bon target saved\b|\bsaved\b", "event_type": "SHOT", "subtype_contains": "SAVED"},
-    {"pattern": r"\bcorner(?: kick)?\b", "event_type": "SET PIECE", "subtype_contains": "CORNER KICK"},
-    {"pattern": r"\bfree kick\b", "event_type": "SET PIECE", "subtype_contains": "FREE KICK"},
+    {"pattern": r"\bcorners?\b|\bcorner kicks?\b", "event_type": "SET PIECE", "subtype_contains": "CORNER KICK"},
+    {"pattern": r"\bfree kicks?\b", "event_type": "SET PIECE", "subtype_contains": "FREE KICK"},
     {"pattern": r"\bkick[\s-]?off\b", "event_type": "SET PIECE", "subtype_contains": "KICK OFF"},
-    {"pattern": r"\bthrow[\s-]?in\b", "event_type": "SET PIECE", "subtype_contains": "THROW IN"},
+    {"pattern": r"\bthrow[\s-]?ins?\b", "event_type": "SET PIECE", "subtype_contains": "THROW IN"},
     {"pattern": r"\bpenalt(?:y|ies)\b", "event_type": "SET PIECE", "subtype_contains": "PENALTY"},
     {"pattern": r"\boffside\b", "event_type": "BALL LOST", "subtype_contains": "OFFSIDE"},
     {"pattern": r"\bball out\b", "event_type": "BALL OUT", "subtype_contains": None},
@@ -172,8 +183,13 @@ def _extract_frame_hint(user_query: str) -> int | None:
 
 def _extract_occurrence_hint(user_query: str) -> int | None:
     lower_query = user_query.lower()
+    ordinal_context_pattern = (
+        r"(goal|shot|corner|corner kick|pass|recovery|interception|card|"
+        r"throw[\s-]?in|free kick|penalty|saved shot|event|foul|minute)"
+    )
+
     for word, value in ORDINAL_WORDS.items():
-        if re.search(rf"\b{word}\b", lower_query):
+        if re.search(rf"\b{word}\s+{ordinal_context_pattern}\b", lower_query):
             return value
 
     ordinal_number_match = re.search(r"\b(\d+)(?:st|nd|rd|th)\b", user_query, flags=re.IGNORECASE)
@@ -184,10 +200,15 @@ def _extract_occurrence_hint(user_query: str) -> int | None:
 
 
 def _extract_order_hint(user_query: str) -> str | None:
-    if re.search(r"\b(last|latest|final)\b", user_query, flags=re.IGNORECASE):
+    order_context_pattern = (
+        r"(goal|shot|corner|corner kick|pass|recovery|interception|card|"
+        r"throw[\s-]?in|free kick|penalty|saved shot|event|foul)"
+    )
+
+    if re.search(rf"\b(last|latest|final)\s+{order_context_pattern}\b", user_query, flags=re.IGNORECASE):
         return "last"
 
-    if _extract_occurrence_hint(user_query) is not None or re.search(r"\bfirst\b", user_query, flags=re.IGNORECASE):
+    if _extract_occurrence_hint(user_query) is not None or re.search(rf"\bfirst\s+{order_context_pattern}\b", user_query, flags=re.IGNORECASE):
         return "first"
 
     return None
@@ -216,10 +237,54 @@ def _extract_relation_hint(user_query: str) -> str | None:
     return None
 
 
+def _extract_period_hint(user_query: str) -> int | None:
+    if re.search(r"\b(first half|period 1|period one)\b", user_query, flags=re.IGNORECASE):
+        return 1
+
+    if re.search(r"\b(second half|period 2|period two)\b", user_query, flags=re.IGNORECASE):
+        return 2
+
+    period_match = re.search(r"\bperiod\s+(\d+)\b", user_query, flags=re.IGNORECASE)
+    if period_match:
+        return int(period_match.group(1))
+
+    return None
+
+
+def _extract_pitch_zone_hint(user_query: str) -> str | None:
+    zone_patterns = [
+        (r"\b(attacking|final)\s+third\b", "attacking_third"),
+        (r"\bmiddle\s+third\b", "middle_third"),
+        (r"\bdefensive\s+third\b", "defensive_third"),
+        (r"\b(left wing|left flank)\b", "left_wing"),
+        (r"\b(right wing|right flank)\b", "right_wing"),
+        (r"\b(central channel|centre channel|center channel|central area)\b", "central_channel"),
+        (r"\b(penalty box|the box|into the box|in the box)\b", "penalty_box"),
+    ]
+
+    for pattern, zone in zone_patterns:
+        if re.search(pattern, user_query, flags=re.IGNORECASE):
+            return zone
+
+    return None
+
+
+def _extract_aggregate_intent(user_query: str) -> str | None:
+    if re.search(r"\b(how many|count|number of)\b", user_query, flags=re.IGNORECASE):
+        return "count"
+
+    if re.search(r"\b(list|show all|all\b|every)\b", user_query, flags=re.IGNORECASE):
+        return "list"
+
+    return None
+
+
 def _extract_event_hint(user_query: str) -> dict[str, Any] | None:
     lower_query = user_query.lower()
     relation = _extract_relation_hint(user_query)
     anchor_frame = _extract_frame_hint(user_query) if relation is not None else None
+    period = _extract_period_hint(user_query)
+    pitch_zone = _extract_pitch_zone_hint(user_query)
 
     for event_pattern in EVENT_PATTERNS:
         if re.search(event_pattern["pattern"], lower_query, flags=re.IGNORECASE):
@@ -235,12 +300,82 @@ def _extract_event_hint(user_query: str) -> dict[str, Any] | None:
                 "order": order,
                 "relation": relation or "exact",
                 "anchor_frame": anchor_frame,
+                "period": period,
+                "pitch_zone": pitch_zone,
             }
             if event_pattern["subtype_contains"]:
                 hint["subtype_contains"] = event_pattern["subtype_contains"]
             return hint
 
+    if period is not None or pitch_zone is not None:
+        return {
+            "event_type": None,
+            "team": _extract_team_hint(user_query),
+            "occurrence": 1,
+            "order": "first",
+            "relation": relation or "exact",
+            "anchor_frame": anchor_frame,
+            "period": period,
+            "pitch_zone": pitch_zone,
+        }
+
     return None
+
+
+def _resolve_aggregate_query(user_query: str) -> dict[str, Any] | None:
+    aggregate_intent = _extract_aggregate_intent(user_query)
+    if aggregate_intent is None:
+        return None
+
+    event_hint = _extract_event_hint(user_query) or {}
+    period = _extract_period_hint(user_query)
+    pitch_zone = _extract_pitch_zone_hint(user_query)
+
+    query_filters = {
+        "event_type": event_hint.get("event_type"),
+        "team": event_hint.get("team"),
+        "subtype_contains": event_hint.get("subtype_contains"),
+        "relation": event_hint.get("relation", "exact"),
+        "anchor_frame": event_hint.get("anchor_frame"),
+        "period": period if period is not None else event_hint.get("period"),
+        "pitch_zone": pitch_zone if pitch_zone is not None else event_hint.get("pitch_zone"),
+    }
+
+    if aggregate_intent == "count":
+        total_count = count_events(**query_filters)
+        return {
+            "coordinates": {},
+            "sequence": None,
+            "context": {
+                "query": user_query,
+                "frame": query_filters["anchor_frame"],
+                "event": None,
+                "mode": "aggregate",
+                "aggregate": {
+                    "query_type": "count",
+                    "count": total_count,
+                    "filters": query_filters,
+                },
+            },
+        }
+
+    events = list_events(**query_filters)
+    return {
+        "coordinates": {},
+        "sequence": None,
+        "context": {
+            "query": user_query,
+            "frame": query_filters["anchor_frame"],
+            "event": None,
+            "mode": "aggregate",
+            "aggregate": {
+                "query_type": "list",
+                "count": len(events),
+                "events": events,
+                "filters": query_filters,
+            },
+        },
+    }
 
 
 def _build_user_content(user_query: str) -> str:
@@ -266,6 +401,10 @@ def _build_user_content(user_query: str) -> str:
         event_parts.append(f'relation="{event_hint["relation"]}"')
         if event_hint.get("anchor_frame") is not None:
             event_parts.append(f'anchor_frame={event_hint["anchor_frame"]}')
+        if event_hint.get("period") is not None:
+            event_parts.append(f'period={event_hint["period"]}')
+        if event_hint.get("pitch_zone") is not None:
+            event_parts.append(f'pitch_zone="{event_hint["pitch_zone"]}"')
         hint_lines.append(
             "Resolved event hint: if you need an event lookup first, "
             f"call find_event with {', '.join(event_parts)}."
@@ -300,6 +439,10 @@ def _serialize_tool_result(function_name: str, function_response: Any) -> str:
 def route_analysis_query(user_query: str) -> dict[str, Any]:
     if not user_query or not user_query.strip():
         raise ValueError("user_query must be a non-empty string.")
+
+    aggregate_result = _resolve_aggregate_query(user_query)
+    if aggregate_result is not None:
+        return aggregate_result
 
     user_content = _build_user_content(user_query)
 
