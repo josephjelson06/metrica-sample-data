@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from math import hypot
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,7 @@ PITCH_ZONE_SQL = {
 
 CoordinateValue = float | int | None
 CoordinateMap = dict[str, dict[str, CoordinateValue]]
+CoordinatePoint = tuple[float, float]
 
 
 def _connect() -> duckdb.DuckDBPyConnection:
@@ -76,6 +78,120 @@ def _build_event_dict(row: tuple[Any, ...]) -> dict[str, Any]:
     event = dict(zip(columns, row))
     event["frame"] = int(event["start_frame"])
     return event
+
+
+def _extract_team_points(coordinates: CoordinateMap, team: str) -> list[CoordinatePoint]:
+    normalized_team = str(team).strip().lower()
+    if normalized_team not in {"home", "away"}:
+        raise ValueError("team must be either 'Home' or 'Away'.")
+
+    team_prefix = "Home_" if normalized_team == "home" else "Away_"
+    points: list[CoordinatePoint] = []
+    for player_name, point in coordinates.items():
+        if not player_name.startswith(team_prefix):
+            continue
+        x_value = point.get("x")
+        y_value = point.get("y")
+        if x_value is None or y_value is None:
+            continue
+        points.append((float(x_value), float(y_value)))
+
+    return points
+
+
+def _cross_product(origin: CoordinatePoint, left: CoordinatePoint, right: CoordinatePoint) -> float:
+    return ((left[0] - origin[0]) * (right[1] - origin[1])) - ((left[1] - origin[1]) * (right[0] - origin[0]))
+
+
+def _convex_hull(points: list[CoordinatePoint]) -> list[CoordinatePoint]:
+    if len(points) < 3:
+        return points
+
+    sorted_points = sorted(points)
+    lower_hull: list[CoordinatePoint] = []
+    for point in sorted_points:
+        while len(lower_hull) >= 2 and _cross_product(lower_hull[-2], lower_hull[-1], point) <= 0:
+            lower_hull.pop()
+        lower_hull.append(point)
+
+    upper_hull: list[CoordinatePoint] = []
+    for point in reversed(sorted_points):
+        while len(upper_hull) >= 2 and _cross_product(upper_hull[-2], upper_hull[-1], point) <= 0:
+            upper_hull.pop()
+        upper_hull.append(point)
+
+    lower_hull.pop()
+    upper_hull.pop()
+    return lower_hull + upper_hull
+
+
+def _polygon_area(points: list[CoordinatePoint]) -> float:
+    if len(points) < 3:
+        return 0.0
+
+    area = 0.0
+    for index, point in enumerate(points):
+        next_point = points[(index + 1) % len(points)]
+        area += (point[0] * next_point[1]) - (next_point[0] * point[1])
+
+    return abs(area) / 2.0
+
+
+def get_team_shape_metrics_for_coordinates(coordinates: CoordinateMap, team: str) -> dict[str, Any]:
+    points = _extract_team_points(coordinates, team)
+    if not points:
+        return {
+            "team": team.title(),
+            "player_count": 0,
+            "width": None,
+            "depth": None,
+            "centroid_x": None,
+            "centroid_y": None,
+            "bounding_box_area": None,
+            "hull_area": None,
+            "average_distance_to_centroid": None,
+            "compactness_area": None,
+        }
+
+    x_values = [point[0] for point in points]
+    y_values = [point[1] for point in points]
+    centroid_x = sum(x_values) / len(points)
+    centroid_y = sum(y_values) / len(points)
+    width = max(y_values) - min(y_values)
+    depth = max(x_values) - min(x_values)
+    hull = _convex_hull(points)
+    hull_area = _polygon_area(hull)
+    average_distance = sum(hypot(point[0] - centroid_x, point[1] - centroid_y) for point in points) / len(points)
+
+    return {
+        "team": team.title(),
+        "player_count": len(points),
+        "width": width,
+        "depth": depth,
+        "centroid_x": centroid_x,
+        "centroid_y": centroid_y,
+        "bounding_box_area": width * depth,
+        "hull_area": hull_area,
+        "average_distance_to_centroid": average_distance,
+        "compactness_area": hull_area,
+    }
+
+
+def get_frame_team_metrics(frame: int, team: str | None = None) -> dict[str, Any]:
+    coordinates = get_tracking_frame(frame)
+    if not coordinates:
+        return {}
+
+    if team is not None:
+        metrics = get_team_shape_metrics_for_coordinates(coordinates, team)
+        metrics["frame"] = frame
+        return metrics
+
+    return {
+        "frame": frame,
+        "Home": get_team_shape_metrics_for_coordinates(coordinates, "Home"),
+        "Away": get_team_shape_metrics_for_coordinates(coordinates, "Away"),
+    }
 
 
 def _normalize_pitch_zone(pitch_zone: str | None) -> str | None:

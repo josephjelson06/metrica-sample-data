@@ -9,7 +9,7 @@ from typing import Any
 from dotenv import load_dotenv
 from groq import Groq
 
-from tools.db_engine import count_events, find_event, get_event_tracking_window, get_tracking_frame, list_events
+from tools.db_engine import count_events, find_event, get_event_tracking_window, get_frame_team_metrics, get_tracking_frame, list_events
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -279,6 +279,26 @@ def _extract_aggregate_intent(user_query: str) -> str | None:
     return None
 
 
+def _extract_metric_hint(user_query: str) -> dict[str, Any] | None:
+    metric_patterns = [
+        (r"\bwidth\b", "width"),
+        (r"\bdepth\b", "depth"),
+        (r"\bcompact(?:ness)?\b", "compactness_area"),
+        (r"\bhull area\b|\bhull\b", "hull_area"),
+        (r"\bcentroid\b|\bcenter\b|\bcentre\b", "centroid"),
+        (r"\bshape metrics\b|\bmetrics\b|\bteam shape\b|\bshape\b", "shape_metrics"),
+    ]
+
+    for pattern, metric_name in metric_patterns:
+        if re.search(pattern, user_query, flags=re.IGNORECASE):
+            return {
+                "metric": metric_name,
+                "team": _extract_team_hint(user_query),
+            }
+
+    return None
+
+
 def _extract_event_hint(user_query: str) -> dict[str, Any] | None:
     lower_query = user_query.lower()
     relation = _extract_relation_hint(user_query)
@@ -444,6 +464,29 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
     if aggregate_result is not None:
         return aggregate_result
 
+    frame_hint = _extract_frame_hint(user_query)
+    event_hint = _extract_event_hint(user_query)
+    metric_hint = _extract_metric_hint(user_query)
+    if frame_hint is not None and (event_hint is None or event_hint.get("event_type") is None):
+        tracking_result = get_tracking_frame(frame_hint)
+        metrics_result: dict[str, Any] | None = None
+        if metric_hint is not None:
+            metrics_result = get_frame_team_metrics(frame=frame_hint, team=metric_hint.get("team"))
+            if metrics_result:
+                metrics_result["requested_metric"] = metric_hint["metric"]
+
+        return {
+            "coordinates": tracking_result,
+            "sequence": None,
+            "context": {
+                "query": user_query,
+                "frame": frame_hint,
+                "event": None,
+                "metrics": metrics_result,
+                "mode": "frame",
+            },
+        }
+
     user_content = _build_user_content(user_query)
 
     client = _get_client()
@@ -453,7 +496,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
     ]
 
     resolved_event: dict[str, Any] | None = None
-    resolved_frame: int | None = _extract_frame_hint(user_query)
+    resolved_frame: int | None = frame_hint
     tracking_sequence: dict[str, Any] | None = None
 
     for _ in range(MAX_TOOL_ITERATIONS):
@@ -499,6 +542,12 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
             if resolved_event is not None and resolved_frame is not None:
                 tracking_sequence = get_event_tracking_window(event_frame=resolved_frame)
 
+            metrics_result: dict[str, Any] | None = None
+            if resolved_frame is not None and metric_hint is not None:
+                metrics_result = get_frame_team_metrics(frame=resolved_frame, team=metric_hint.get("team"))
+                if metrics_result:
+                    metrics_result["requested_metric"] = metric_hint["metric"]
+
             return {
                 "coordinates": tracking_result,
                 "sequence": tracking_sequence,
@@ -506,6 +555,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                     "query": user_query,
                     "frame": resolved_frame,
                     "event": resolved_event,
+                    "metrics": metrics_result,
                     "mode": "event" if resolved_event is not None else "frame",
                 },
             }
