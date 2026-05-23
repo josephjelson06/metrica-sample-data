@@ -110,6 +110,18 @@ function sectionTitleStyle() {
   } as const;
 }
 
+function actionButtonStyle() {
+  return {
+    border: "1px solid rgba(21,32,23,0.1)",
+    borderRadius: 999,
+    padding: "8px 12px",
+    background: "rgba(255,255,255,0.86)",
+    color: "var(--ink)",
+    fontWeight: 700,
+    cursor: "pointer",
+  } as const;
+}
+
 function getPrimaryResultTitle(context: AnalysisContext | null) {
   if (!context) {
     return "Waiting For Analysis";
@@ -226,7 +238,10 @@ function renderSequenceChips(sequenceEvents: SequenceEvent[], framesPerSecond: n
   );
 }
 
-function renderAggregatePanel(aggregate: AggregateContext | null | undefined) {
+function renderAggregatePanel(
+  aggregate: AggregateContext | null | undefined,
+  onOpenEventFrame: ((frame: number) => void) | null,
+) {
   if (!aggregate) {
     return null;
   }
@@ -263,6 +278,7 @@ function renderAggregatePanel(aggregate: AggregateContext | null | undefined) {
                   <th style={{ padding: "12px 18px" }}>Type</th>
                   <th style={{ padding: "12px 18px" }}>Subtype</th>
                   <th style={{ padding: "12px 18px" }}>Frame</th>
+                  <th style={{ padding: "12px 18px" }}>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -273,6 +289,17 @@ function renderAggregatePanel(aggregate: AggregateContext | null | undefined) {
                     <td style={{ padding: "12px 18px" }}>{event.type}</td>
                     <td style={{ padding: "12px 18px" }}>{event.subtype ?? "-"}</td>
                     <td style={{ padding: "12px 18px" }}>{event.frame}</td>
+                    <td style={{ padding: "12px 18px" }}>
+                      {onOpenEventFrame ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenEventFrame(event.frame)}
+                          style={actionButtonStyle()}
+                        >
+                          Open frame
+                        </button>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -317,7 +344,10 @@ function renderSequenceSegmentsPanel(sequenceSegments: SequenceSegments | null |
   );
 }
 
-function renderComparisonPanel(comparison: ComparisonContext | null | undefined) {
+function renderComparisonPanel(
+  comparison: ComparisonContext | null | undefined,
+  onOpenComparisonFrame: ((frame: number) => void) | null,
+) {
   if (!comparison) {
     return null;
   }
@@ -347,6 +377,24 @@ function renderComparisonPanel(comparison: ComparisonContext | null | undefined)
           <p style={{ margin: "10px 0 0", color: "var(--ink)" }}>
             Comparison kind: <strong>{comparison.comparison_kind.replace(/_/g, " ")}</strong>
           </p>
+        ) : null}
+        {onOpenComparisonFrame ? (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 14 }}>
+            <button
+              type="button"
+              onClick={() => onOpenComparisonFrame(comparison.left_frame)}
+              style={actionButtonStyle()}
+            >
+              Open left frame
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenComparisonFrame(comparison.right_frame)}
+              style={actionButtonStyle()}
+            >
+              Open right frame
+            </button>
+          </div>
         ) : null}
       </div>
 
@@ -507,6 +555,7 @@ function renderResultSurface(
   sequenceEvents: SequenceEvent[],
   replaySequence: TrackingSequence | null,
   pitchTransitionMs: number,
+  onOpenEventFrame: ((frame: number) => void) | null,
 ) {
   if (!context) {
     return (
@@ -522,7 +571,7 @@ function renderResultSurface(
   if (context.mode === "aggregate") {
     return (
       <div style={{ display: "grid", gap: 14 }}>
-        {renderAggregatePanel(context.aggregate)}
+        {renderAggregatePanel(context.aggregate, onOpenEventFrame)}
         {renderExplanationPanel(context)}
         {renderReportPanel(context)}
       </div>
@@ -532,7 +581,7 @@ function renderResultSurface(
   if (context.mode === "comparison") {
     return (
       <div style={{ display: "grid", gap: 14 }}>
-        {renderComparisonPanel(context.comparison)}
+        {renderComparisonPanel(context.comparison, onOpenEventFrame)}
         {displayedCoordinates ? (
           <div style={{ ...cardStyle(), padding: 20 }}>
             <h3 style={sectionTitleStyle()}>Reference Pitch</h3>
@@ -665,6 +714,10 @@ export function AnalysisWorkspace() {
 
     return () => window.clearInterval(timer);
   }, [advancePlaybackTick, hasSequence, isPlaying, playbackIntervalMs, sequence, setPlaying, status]);
+
+  const openResultFrame = useEffectEvent((frame: number) => {
+    startTransition(() => requestFrame(frame));
+  });
 
   return (
     <main
@@ -995,6 +1048,7 @@ export function AnalysisWorkspace() {
           sequenceEvents,
           replaySequence,
           pitchTransitionMs,
+          openResultFrame,
         )}
       </section>
     </main>
