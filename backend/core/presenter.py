@@ -166,6 +166,155 @@ def _sequence_comparison_line(sequence_comparison: dict[str, Any]) -> str | None
     return "Sequence comparison deltas: " + ", ".join(parts) + "."
 
 
+def _build_shape_interpretation_line(sequence: dict[str, Any] | None, team: str | None) -> str | None:
+    if not sequence or not team:
+        return None
+
+    start_frame = sequence.get("start_frame")
+    event_frame = sequence.get("event_frame")
+    if not isinstance(start_frame, int) or not isinstance(event_frame, int):
+        return None
+
+    comparison = compare_team_metrics_between_frames(start_frame, event_frame, team)
+    if not comparison:
+        return None
+
+    deltas = comparison.get("deltas", {})
+    interpretations: list[str] = []
+
+    width_delta = float(deltas.get("width") or 0.0)
+    if abs(width_delta) >= 0.08:
+        interpretations.append(
+            "the team spread wider"
+            if width_delta > 0
+            else "the team narrowed its width"
+        )
+
+    compactness_delta = float(deltas.get("compactness_area") or 0.0)
+    if abs(compactness_delta) >= 0.03:
+        interpretations.append(
+            "its shape opened up more"
+            if compactness_delta > 0
+            else "its shape became more compact"
+        )
+
+    line_height_delta = float(deltas.get("line_height_proxy") or 0.0)
+    if abs(line_height_delta) >= 0.04:
+        interpretations.append(
+            "the back line stepped higher"
+            if line_height_delta > 0
+            else "the back line dropped deeper"
+        )
+
+    deep_to_mid_delta = float(deltas.get("deep_to_mid_spacing") or 0.0)
+    mid_to_high_delta = float(deltas.get("mid_to_high_spacing") or 0.0)
+    spacing_shift = deep_to_mid_delta + mid_to_high_delta
+    if abs(spacing_shift) >= 0.06:
+        interpretations.append(
+            "the spaces between units opened up"
+            if spacing_shift > 0
+            else "the spaces between units tightened"
+        )
+
+    if not interpretations:
+        return None
+
+    return f"In tactical terms, {team} showed that " + "; ".join(interpretations) + "."
+
+
+def _build_buildup_interpretation_line(context: dict[str, Any]) -> str | None:
+    sequence_segments = context.get("sequence_segments")
+    event = context.get("event")
+    if not sequence_segments or not event or event.get("team") not in {"Home", "Away"}:
+        return None
+
+    team = str(event["team"])
+    same_team_before_count = int(sequence_segments.get("same_team_before_count", 0))
+    opponent_before_count = int(sequence_segments.get("opponent_before_count", 0))
+    pass_count = int(sequence_segments.get("same_team_before_counts_by_type", {}).get("PASS", 0))
+    last_action = sequence_segments.get("last_same_team_before_event") or {}
+    last_subtype = str(last_action.get("subtype") or "").upper()
+    event_subtype = str(event.get("subtype") or "").upper()
+
+    interpretations: list[str] = []
+    if same_team_before_count >= 3 and pass_count >= 3:
+        interpretations.append("the move was built through a sustained passing lead-in")
+    if opponent_before_count == 0 and same_team_before_count > 0:
+        interpretations.append("the team kept control of the buildup without an opponent interruption inside this window")
+    if "CROSS" in last_subtype:
+        interpretations.append("the final delivery before the key event came from a cross")
+    if "GOAL" in event_subtype:
+        interpretations.append("the buildup ended in a scoring shot")
+
+    if not interpretations:
+        return None
+    return f"At a higher level, {team} showed that " + "; ".join(interpretations) + "."
+
+
+def _build_transition_interpretation_line(context: dict[str, Any]) -> str | None:
+    sequence_segments = context.get("sequence_segments")
+    transition_summary = context.get("transition_summary")
+    event = context.get("event")
+    if not sequence_segments or not transition_summary or not event or event.get("team") not in {"Home", "Away"}:
+        return None
+
+    team = str(event["team"])
+    continuation_count = int(sequence_segments.get("continuation_count_before_opponent", 0))
+    opponent_after_count = int(sequence_segments.get("opponent_after_count", 0))
+    first_shot_seconds = transition_summary.get("first_shot_seconds_from_anchor")
+
+    interpretations: list[str] = []
+    if continuation_count >= 2:
+        interpretations.append("the team carried the transition forward with multiple follow-up actions")
+    if opponent_after_count == 0 and continuation_count > 0:
+        interpretations.append("the opponent did not interrupt the sequence inside the sampled window")
+    elif opponent_after_count > 0 and continuation_count == 0:
+        interpretations.append("the opponent disrupted the transition almost immediately")
+    if first_shot_seconds is not None and float(first_shot_seconds) <= 4.0:
+        interpretations.append("the transition reached a shot quickly")
+
+    if not interpretations:
+        return None
+    return f"At a higher level, {team} showed that " + "; ".join(interpretations) + "."
+
+
+def _build_sequence_comparison_interpretation_line(comparison: dict[str, Any]) -> str | None:
+    comparison_kind = comparison.get("comparison_kind")
+    sequence_comparison = comparison.get("sequence_comparison", {})
+    deltas = sequence_comparison.get("deltas", {})
+    if comparison_kind not in {"buildup_sequence", "transition_sequence"} or not deltas:
+        return None
+
+    interpretations: list[str] = []
+    continuation_delta = deltas.get("continuation_count_before_opponent")
+    if continuation_delta is not None:
+        continuation_delta_value = int(continuation_delta)
+        if continuation_delta_value >= 2:
+            interpretations.append("the second sequence sustained possession longer before an interruption")
+        elif continuation_delta_value <= -2:
+            interpretations.append("the first sequence sustained possession longer before an interruption")
+
+    opponent_after_delta = deltas.get("opponent_after_count")
+    if opponent_after_delta is not None:
+        opponent_after_delta_value = int(opponent_after_delta)
+        if opponent_after_delta_value >= 2:
+            interpretations.append("the second sequence attracted more opponent follow-up actions")
+        elif opponent_after_delta_value <= -2:
+            interpretations.append("the first sequence attracted more opponent follow-up actions")
+
+    lead_in_delta = deltas.get("same_team_before_count")
+    if comparison_kind == "buildup_sequence" and lead_in_delta is not None:
+        lead_in_delta_value = int(lead_in_delta)
+        if lead_in_delta_value >= 2:
+            interpretations.append("the second buildup had a longer same-team lead-in")
+        elif lead_in_delta_value <= -2:
+            interpretations.append("the first buildup had a longer same-team lead-in")
+
+    if not interpretations:
+        return None
+    return "In tactical terms, " + "; ".join(interpretations) + "."
+
+
 def _build_comparison_explanation(context: dict[str, Any]) -> str:
     comparison = context.get("comparison", {})
     left_label = comparison.get("left_label", "the first moment")
@@ -200,6 +349,10 @@ def _build_comparison_explanation(context: dict[str, Any]) -> str:
     sequence_comparison_line = _sequence_comparison_line(comparison.get("sequence_comparison", {}))
     if sequence_comparison_line:
         lines.append(sequence_comparison_line)
+
+    sequence_comparison_interpretation_line = _build_sequence_comparison_interpretation_line(comparison)
+    if sequence_comparison_interpretation_line:
+        lines.append(sequence_comparison_interpretation_line)
 
     return " ".join(lines)
 
@@ -390,6 +543,15 @@ def build_explanation(analysis_result: dict[str, Any]) -> str:
     if transition_segmentation_line:
         lines.append(transition_segmentation_line)
 
+    if mode == "buildup":
+        buildup_interpretation_line = _build_buildup_interpretation_line(context)
+        if buildup_interpretation_line:
+            lines.append(buildup_interpretation_line)
+    elif mode == "transition":
+        transition_interpretation_line = _build_transition_interpretation_line(context)
+        if transition_interpretation_line:
+            lines.append(transition_interpretation_line)
+
     metric_line = _metric_focus_line(metrics)
     if metric_line:
         lines.append(metric_line)
@@ -403,6 +565,10 @@ def build_explanation(analysis_result: dict[str, Any]) -> str:
     change_line = _sequence_change_line(sequence, comparison_team)
     if change_line:
         lines.append(change_line)
+
+    shape_interpretation_line = _build_shape_interpretation_line(sequence, comparison_team)
+    if shape_interpretation_line:
+        lines.append(shape_interpretation_line)
 
     return " ".join(lines)
 

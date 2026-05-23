@@ -720,6 +720,31 @@ def _serialize_tool_result(function_name: str, function_response: Any) -> str:
     return json.dumps(function_response)
 
 
+def _finalize_analysis_result(result: dict[str, Any], wants_report: bool) -> dict[str, Any]:
+    context = result["context"]
+    sequence = result.get("sequence")
+
+    context["response_contract_version"] = "v1"
+    context["query_family"] = str(context.get("mode", "unknown"))
+    context["has_event"] = context.get("event") is not None
+    context["has_anchor_event"] = context.get("anchor_event") is not None
+    context["has_metrics"] = context.get("metrics") is not None
+    context["has_sequence"] = bool(sequence)
+    context["sequence_type"] = sequence.get("sequence_type") if isinstance(sequence, dict) else None
+    context["has_aggregate"] = context.get("aggregate") is not None
+    context["has_comparison"] = context.get("comparison") is not None
+    if context.get("comparison") is not None:
+        context["comparison_kind"] = context["comparison"].get("comparison_kind")
+    context["has_report"] = wants_report
+    context["explanation"] = build_explanation(result)
+    context["has_explanation"] = True
+    if wants_report:
+        context["report"] = build_report(result)
+    else:
+        context.pop("report", None)
+    return result
+
+
 def route_analysis_query(user_query: str) -> dict[str, Any]:
     if not user_query or not user_query.strip():
         raise ValueError("user_query must be a non-empty string.")
@@ -730,10 +755,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
     if not buildup_intent and not transition_intent:
         aggregate_result = _resolve_aggregate_query(user_query)
         if aggregate_result is not None:
-            aggregate_result["context"]["explanation"] = build_explanation(aggregate_result)
-            if wants_report:
-                aggregate_result["context"]["report"] = build_report(aggregate_result)
-            return aggregate_result
+            return _finalize_analysis_result(aggregate_result, wants_report)
 
     frame_hint = _extract_frame_hint(user_query)
     event_hint = _extract_event_hint(user_query)
@@ -781,10 +803,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 "mode": "buildup",
             },
         }
-        result["context"]["explanation"] = build_explanation(result)
-        if wants_report:
-            result["context"]["report"] = build_report(result)
-        return result
+        return _finalize_analysis_result(result, wants_report)
 
     if comparison_hint is None and transition_intent and event_hint is not None and event_hint.get("event_type") is not None:
         resolved_event = find_event(
@@ -836,10 +855,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 "mode": "transition",
             },
         }
-        result["context"]["explanation"] = build_explanation(result)
-        if wants_report:
-            result["context"]["report"] = build_report(result)
-        return result
+        return _finalize_analysis_result(result, wants_report)
 
     if comparison_hint is not None:
         left_reference = _resolve_reference(comparison_hint["left"])
@@ -910,10 +926,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 },
             },
         }
-        result["context"]["explanation"] = build_explanation(result)
-        if wants_report:
-            result["context"]["report"] = build_report(result)
-        return result
+        return _finalize_analysis_result(result, wants_report)
 
     if frame_hint is not None and (event_hint is None or event_hint.get("event_type") is None):
         tracking_result = get_tracking_frame(frame_hint)
@@ -934,10 +947,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 "mode": "frame",
             },
         }
-        result["context"]["explanation"] = build_explanation(result)
-        if wants_report:
-            result["context"]["report"] = build_report(result)
-        return result
+        return _finalize_analysis_result(result, wants_report)
 
     if sequence_hint is None and event_hint is not None and event_hint.get("event_type") is not None:
         resolved_event = find_event(
@@ -972,10 +982,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 "mode": "event",
             },
         }
-        result["context"]["explanation"] = build_explanation(result)
-        if wants_report:
-            result["context"]["report"] = build_report(result)
-        return result
+        return _finalize_analysis_result(result, wants_report)
 
     if sequence_hint is not None:
         anchor_hint = dict(sequence_hint["anchor"])
@@ -1025,10 +1032,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 "mode": "sequence_event",
             },
         }
-        result["context"]["explanation"] = build_explanation(result)
-        if wants_report:
-            result["context"]["report"] = build_report(result)
-        return result
+        return _finalize_analysis_result(result, wants_report)
 
     user_content = _build_user_content(user_query)
 
@@ -1102,10 +1106,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                     "mode": "event" if resolved_event is not None else "frame",
                 },
             }
-            result["context"]["explanation"] = build_explanation(result)
-            if wants_report:
-                result["context"]["report"] = build_report(result)
-            return result
+            return _finalize_analysis_result(result, wants_report)
 
     raise RuntimeError("Max tool iterations reached before resolving tracking coordinates.")
 

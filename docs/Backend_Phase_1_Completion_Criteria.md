@@ -128,7 +128,7 @@ Examples:
 - identify cleaner follow-up chains inside transitions
 - better separate trigger, continuation, and outcome
 
-This is one of the main remaining backend priorities.
+This has now been implemented to a useful first level.
 
 ### 2. Stronger sequence-level comparison
 
@@ -141,7 +141,7 @@ Examples:
 - compare two buildups
 - compare two transitions
 
-This has now started, but it still needs refinement before it feels complete.
+This has now been implemented to a useful first level.
 
 ### 3. Better tactical explanation quality
 
@@ -158,9 +158,13 @@ It should get stronger at:
 
 This should still stay grounded in measurable data.
 
+This has now been improved enough for Phase 1 handoff.
+
 ### 4. A final sanity pass on payload stability
 
 Before moving focus to frontend/reporting, we should make sure the main result formats feel settled enough to build on.
+
+This has now been completed through the shared response metadata and contract fields.
 
 ## The handoff point
 
@@ -215,17 +219,17 @@ That is where we learn:
 
 ## Current recommendation
 
-Right now, the project is close to the right stopping zone for backend Phase 1, but not fully there yet.
+Right now, the project has reached the right stopping zone for backend Phase 1.
 
-The most sensible final backend pushes are:
+The major backend-first pushes for this phase are now in place:
 
 1. richer sequence segmentation
 2. stronger sequence-level comparison
 3. better tactical explanation grounded in those sequence features
 
-After that, the best move is not endless backend growth.
-The best move is to let frontend and reporting catch up.
+That means the best move now is not endless backend growth.
+The best move now is to let frontend and reporting catch up.
 
 ## One-line summary
 
-Backend Phase 1 is complete when the system can answer the major football question families supported by the current data, return stable sequence-aware outputs, compare moments and sequences usefully, and explain results in grounded football language well enough for frontend and reporting to build on top of it.
+Backend Phase 1 is now complete enough for handoff: the system can answer the major football question families supported by the current data, return stable sequence-aware outputs, compare moments and sequences usefully, and explain results in grounded football language well enough for frontend and reporting to build on top of it.

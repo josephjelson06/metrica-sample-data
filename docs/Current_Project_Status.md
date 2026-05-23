@@ -141,6 +141,7 @@ And from those queries it can already return:
 - sequence-level comparison deltas for buildup and transition flows
 - plain-English explanations
 - short report-style summaries when requested
+- stable response metadata for frontend and reporting handoff
 
 ## What this means in practical terms
 
@@ -167,47 +168,39 @@ It is now capable of:
 - first sequence-level comparison for buildup and transition flows
 - deterministic explanation output
 - first report-generation output
+- output-contract stabilization for downstream frontend/reporting work
 
 ## Where we can go next from here
 
-The next phase is to deepen intelligence from the same data, not to step away from it.
+The backend has now reached a strong enough Phase 1 handoff point.
+That means the next phase is no longer "keep extending backend first at all costs."
+The next phase is to use this backend as the stable base for frontend catch-up and better reporting.
 
 The strongest directions forward are:
 
-### 1. Deeper sequence reasoning
+### 1. Frontend catch-up
 
-- stronger transition chains
-- richer event-to-event context
-- richer event-chain segmentation inside buildup windows
+- replay and sequence views that match the current backend payloads
+- comparison views for moment and sequence comparison
+- metric cards and explanation panels
+- aggregate/list views for count and list queries
 
-### 2. Richer tactical metrics
+### 2. Reporting catch-up
 
-- movement features
-- more shape and compactness logic
-- stronger player-to-player and line-to-line structure modelling
+- cleaner markdown reports
+- sequence summaries
+- comparison reports
+- event-family summaries
 
-### 3. Better explanation output
+### 3. Phase 2 backend improvements later
 
-- explain why a moment matters
-- explain how a move developed
-- explain what changed structurally before and after an event
-
-### 4. Better output matching
-
-- pitch view when spatial answer is needed
-- replay when sequence answer is needed
-- tables and lists when aggregate answer is needed
-- text/report output when interpretation is needed
-
-### 5. Within-match comparison
-
-- compare first-half and second-half patterns more deeply
-- compare event groups, not just single moments
-- compare team shape across richer sequence windows
+- more advanced movement modelling
+- stronger tactical interpretation
+- richer multi-sequence reasoning after we see real usage gaps
 
 ## Current status summary
 
-Right now, this project is in a strong middle stage:
+Right now, this project is at the end of a strong backend-first stage:
 
 - the data layer is working
 - the football query engine is working
@@ -221,7 +214,7 @@ Right now, this project is in a strong middle stage:
 - sequence segmentation for those windows has started
 - sequence-level comparison has started
 - explanation and reporting output have started
-- richer tactical explanation and stronger comparison logic are now the next major frontier
+- backend Phase 1 is now stable enough for frontend and reporting to catch up next
 
 ## One-line summary
 

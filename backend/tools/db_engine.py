@@ -769,6 +769,7 @@ def get_event_tracking_window(
         "event_frame": event_frame,
         "start_frame": start_frame,
         "end_frame": end_frame,
+        "sequence_type": "event",
         "frame_step": frame_step,
         "frames_per_second": FRAMES_PER_SECOND,
         "frames": frames,
