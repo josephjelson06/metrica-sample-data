@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.tools.db_engine import FRAMES_PER_SECOND, get_frame_team_metrics
+from backend.tools.db_engine import FRAMES_PER_SECOND, compare_team_metrics_between_frames, get_frame_team_metrics
 
 
 def _format_match_time(seconds: float | int | None) -> str:
@@ -46,9 +46,21 @@ def _metric_focus_line(metrics: dict[str, Any] | None) -> str | None:
         if "Home" in metrics and "Away" in metrics:
             return (
                 f"Home width {metrics['Home']['width']:.3f}, Away width {metrics['Away']['width']:.3f}; "
-                f"Home depth {metrics['Home']['depth']:.3f}, Away depth {metrics['Away']['depth']:.3f}."
+                f"Home depth {metrics['Home']['depth']:.3f}, Away depth {metrics['Away']['depth']:.3f}; "
+                f"Home line-height proxy {metrics['Home']['line_height_proxy']:.3f}, Away line-height proxy {metrics['Away']['line_height_proxy']:.3f}."
             )
         return None
+
+    if requested_metric == "unit_spacing":
+        team = metrics.get("team")
+        deep_to_mid = metrics.get("deep_to_mid_spacing")
+        mid_to_high = metrics.get("mid_to_high_spacing")
+        if team is None or deep_to_mid is None or mid_to_high is None:
+            return None
+        return (
+            f"{team} unit spacing at this moment is deep-to-mid {float(deep_to_mid):.3f} and "
+            f"mid-to-high {float(mid_to_high):.3f}."
+        )
 
     metric_value = metrics.get(requested_metric)
     team = metrics.get("team")
@@ -56,6 +68,8 @@ def _metric_focus_line(metrics: dict[str, Any] | None) -> str | None:
         return None
 
     readable_metric = str(requested_metric).replace("_", " ")
+    if requested_metric == "line_height_proxy":
+        readable_metric = "line-height proxy"
     return f"{team} {readable_metric} at this moment is {float(metric_value):.3f}."
 
 
@@ -68,17 +82,22 @@ def _sequence_change_line(sequence: dict[str, Any] | None, team: str | None) -> 
     if not isinstance(start_frame, int) or not isinstance(event_frame, int):
         return None
 
-    start_metrics = get_frame_team_metrics(start_frame, team)
-    end_metrics = get_frame_team_metrics(event_frame, team)
-    if not start_metrics or not end_metrics:
+    comparison = compare_team_metrics_between_frames(start_frame, event_frame, team)
+    if not comparison:
         return None
 
-    width_delta = float(end_metrics["width"]) - float(start_metrics["width"])
-    depth_delta = float(end_metrics["depth"]) - float(start_metrics["depth"])
-    compactness_delta = float(end_metrics["compactness_area"]) - float(start_metrics["compactness_area"])
+    deltas = comparison["deltas"]
+    width_delta = float(deltas["width"])
+    depth_delta = float(deltas["depth"])
+    compactness_delta = float(deltas["compactness_area"])
+    line_height_delta = float(deltas["line_height_proxy"])
+    deep_to_mid_delta = float(deltas["deep_to_mid_spacing"])
+    mid_to_high_delta = float(deltas["mid_to_high_spacing"])
     return (
         f"From the start of the clip to the key frame, {team} width changed by {_format_signed_delta(width_delta)}, "
-        f"depth by {_format_signed_delta(depth_delta)}, and compactness area by {_format_signed_delta(compactness_delta)}."
+        f"depth by {_format_signed_delta(depth_delta)}, compactness area by {_format_signed_delta(compactness_delta)}, "
+        f"line-height proxy by {_format_signed_delta(line_height_delta)}, deep-to-mid spacing by {_format_signed_delta(deep_to_mid_delta)}, "
+        f"and mid-to-high spacing by {_format_signed_delta(mid_to_high_delta)}."
     )
 
 

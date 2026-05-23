@@ -61,6 +61,7 @@ We built a DuckDB-based data engine that can now:
 - filter by pitch zone
 - filter by phase of play
 - compute frame-level team shape metrics
+- compare team structure between two frames
 
 ### 4. Natural-language routing
 
@@ -75,6 +76,7 @@ We built a Groq-based query router that can understand and resolve:
 - spatial queries like attacking third, box, wing, and central channel
 - phase queries like attacking transition, defensive transition, and set piece
 - metric queries like width, depth, compactness, hull area, and team shape
+- richer metric queries like line height proxy, team length proxy, and unit spacing
 - chained event queries like `first shot after the away team's second corner`
 
 ### 5. Live backend pipeline
@@ -122,6 +124,8 @@ And from those queries it can already return:
 - pitch-zone filters
 - phase labels
 - team shape metrics
+- line-height and unit-spacing proxies
+- frame-to-frame structure deltas
 - plain-English explanations
 - short report-style summaries when requested
 
@@ -141,6 +145,7 @@ It is now capable of:
 - aggregate querying
 - phase-aware event analysis
 - frame-based tactical metrics
+- frame-to-frame team structure comparison
 - first-level event-to-event reasoning
 - deterministic explanation output
 - first report-generation output
@@ -159,10 +164,9 @@ The strongest directions forward are:
 
 ### 2. Richer tactical metrics
 
-- line height
-- spacing between units
 - movement features
 - more shape and compactness logic
+- stronger player-to-player and line-to-line structure modelling
 
 ### 3. Better explanation output
 

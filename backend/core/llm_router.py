@@ -317,6 +317,10 @@ def _extract_metric_hint(user_query: str) -> dict[str, Any] | None:
     metric_patterns = [
         (r"\bwidth\b", "width"),
         (r"\bdepth\b", "depth"),
+        (r"\bline height\b|\bline-height\b", "line_height_proxy"),
+        (r"\b(unit spacing|team spacing|line spacing)\b", "unit_spacing"),
+        (r"\bteam length\b|\blength\b", "team_length_proxy"),
+        (r"\bnearest teammate distance\b|\bnearest distance\b", "average_nearest_teammate_distance"),
         (r"\bcompact(?:ness)?\b", "compactness_area"),
         (r"\bhull area\b|\bhull\b", "hull_area"),
         (r"\bcentroid\b|\bcenter\b|\bcentre\b", "centroid"),

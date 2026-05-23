@@ -36,6 +36,7 @@ PHASE_LABELS = {
 CoordinateValue = float | int | None
 CoordinateMap = dict[str, dict[str, CoordinateValue]]
 CoordinatePoint = tuple[float, float]
+ComparableMetricValue = float | int | None
 
 
 def _connect() -> duckdb.DuckDBPyConnection:
@@ -190,6 +191,23 @@ def _polygon_area(points: list[CoordinatePoint]) -> float:
     return abs(area) / 2.0
 
 
+def _average(values: list[float]) -> float:
+    return sum(values) / len(values)
+
+
+def _average_nearest_teammate_distance(points: list[CoordinatePoint]) -> float:
+    if len(points) < 2:
+        return 0.0
+
+    total_distance = 0.0
+    for index, point in enumerate(points):
+        other_points = [other_point for other_index, other_point in enumerate(points) if other_index != index]
+        nearest_distance = min(hypot(point[0] - other_point[0], point[1] - other_point[1]) for other_point in other_points)
+        total_distance += nearest_distance
+
+    return total_distance / len(points)
+
+
 def get_team_shape_metrics_for_coordinates(coordinates: CoordinateMap, team: str) -> dict[str, Any]:
     points = _extract_team_points(coordinates, team)
     if not points:
@@ -204,6 +222,15 @@ def get_team_shape_metrics_for_coordinates(coordinates: CoordinateMap, team: str
             "hull_area": None,
             "average_distance_to_centroid": None,
             "compactness_area": None,
+            "line_height_proxy": None,
+            "deep_unit_x": None,
+            "middle_unit_x": None,
+            "high_unit_x": None,
+            "team_length_proxy": None,
+            "deep_to_mid_spacing": None,
+            "mid_to_high_spacing": None,
+            "largest_x_gap": None,
+            "average_nearest_teammate_distance": None,
         }
 
     x_values = [point[0] for point in points]
@@ -215,6 +242,20 @@ def get_team_shape_metrics_for_coordinates(coordinates: CoordinateMap, team: str
     hull = _convex_hull(points)
     hull_area = _polygon_area(hull)
     average_distance = sum(hypot(point[0] - centroid_x, point[1] - centroid_y) for point in points) / len(points)
+    sorted_x_values = sorted(x_values)
+    deep_unit_values = sorted_x_values[:3]
+    middle_unit_values = sorted_x_values[3:8]
+    high_unit_values = sorted_x_values[8:]
+    deep_unit_x = _average(deep_unit_values)
+    middle_unit_x = _average(middle_unit_values)
+    high_unit_x = _average(high_unit_values)
+    deep_to_mid_spacing = middle_unit_x - deep_unit_x
+    mid_to_high_spacing = high_unit_x - middle_unit_x
+    largest_x_gap = max(
+        sorted_x_values[index + 1] - sorted_x_values[index]
+        for index in range(len(sorted_x_values) - 1)
+    )
+    average_nearest_distance = _average_nearest_teammate_distance(points)
 
     return {
         "team": team.title(),
@@ -227,6 +268,15 @@ def get_team_shape_metrics_for_coordinates(coordinates: CoordinateMap, team: str
         "hull_area": hull_area,
         "average_distance_to_centroid": average_distance,
         "compactness_area": hull_area,
+        "line_height_proxy": deep_unit_x,
+        "deep_unit_x": deep_unit_x,
+        "middle_unit_x": middle_unit_x,
+        "high_unit_x": high_unit_x,
+        "team_length_proxy": high_unit_x - deep_unit_x,
+        "deep_to_mid_spacing": deep_to_mid_spacing,
+        "mid_to_high_spacing": mid_to_high_spacing,
+        "largest_x_gap": largest_x_gap,
+        "average_nearest_teammate_distance": average_nearest_distance,
     }
 
 
@@ -244,6 +294,51 @@ def get_frame_team_metrics(frame: int, team: str | None = None) -> dict[str, Any
         "frame": frame,
         "Home": get_team_shape_metrics_for_coordinates(coordinates, "Home"),
         "Away": get_team_shape_metrics_for_coordinates(coordinates, "Away"),
+    }
+
+
+def compare_team_metrics_between_frames(start_frame: int, end_frame: int, team: str) -> dict[str, Any]:
+    start_metrics = get_frame_team_metrics(start_frame, team)
+    end_metrics = get_frame_team_metrics(end_frame, team)
+    if not start_metrics or not end_metrics:
+        return {}
+
+    comparable_metrics = [
+        "width",
+        "depth",
+        "centroid_x",
+        "centroid_y",
+        "bounding_box_area",
+        "hull_area",
+        "average_distance_to_centroid",
+        "compactness_area",
+        "line_height_proxy",
+        "deep_unit_x",
+        "middle_unit_x",
+        "high_unit_x",
+        "team_length_proxy",
+        "deep_to_mid_spacing",
+        "mid_to_high_spacing",
+        "largest_x_gap",
+        "average_nearest_teammate_distance",
+    ]
+
+    deltas: dict[str, ComparableMetricValue] = {}
+    for metric_name in comparable_metrics:
+        start_value = start_metrics.get(metric_name)
+        end_value = end_metrics.get(metric_name)
+        if start_value is None or end_value is None:
+            deltas[metric_name] = None
+            continue
+        deltas[metric_name] = float(end_value) - float(start_value)
+
+    return {
+        "team": team.title(),
+        "start_frame": start_frame,
+        "end_frame": end_frame,
+        "start_metrics": start_metrics,
+        "end_metrics": end_metrics,
+        "deltas": deltas,
     }
 
 
