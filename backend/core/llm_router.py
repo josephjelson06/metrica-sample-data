@@ -9,6 +9,7 @@ from typing import Any
 from dotenv import load_dotenv
 from groq import Groq
 
+from backend.core.presenter import build_explanation, build_report
 from backend.tools.db_engine import (
     count_events,
     find_event,
@@ -292,6 +293,10 @@ def _extract_aggregate_intent(user_query: str) -> str | None:
     return None
 
 
+def _has_explicit_order_selector(user_query: str) -> bool:
+    return re.search(r"\b(first|second|third|fourth|fifth|last|latest|final)\b", user_query, flags=re.IGNORECASE) is not None
+
+
 def _extract_phase_hint(user_query: str) -> str | None:
     phase_patterns = [
         (r"\bset piece\b", "set_piece"),
@@ -328,6 +333,10 @@ def _extract_metric_hint(user_query: str) -> dict[str, Any] | None:
     return None
 
 
+def _extract_report_intent(user_query: str) -> bool:
+    return re.search(r"\b(report|summari[sz]e|summary|breakdown|coach note|write up)\b", user_query, flags=re.IGNORECASE) is not None
+
+
 def _extract_sequence_event_query(user_query: str) -> dict[str, Any] | None:
     sequence_match = re.search(r"\b(after|before)\b", user_query, flags=re.IGNORECASE)
     if sequence_match is None:
@@ -356,8 +365,9 @@ def _extract_sequence_event_query(user_query: str) -> dict[str, Any] | None:
 
 def _extract_event_hint(user_query: str) -> dict[str, Any] | None:
     lower_query = user_query.lower()
-    relation = _extract_relation_hint(user_query)
-    anchor_frame = _extract_frame_hint(user_query) if relation is not None else None
+    raw_relation = _extract_relation_hint(user_query)
+    anchor_frame = _extract_frame_hint(user_query) if raw_relation is not None else None
+    relation = raw_relation if anchor_frame is not None else None
     period = _extract_period_hint(user_query)
     pitch_zone = _extract_pitch_zone_hint(user_query)
     phase = _extract_phase_hint(user_query)
@@ -402,6 +412,16 @@ def _extract_event_hint(user_query: str) -> dict[str, Any] | None:
 
 def _resolve_aggregate_query(user_query: str) -> dict[str, Any] | None:
     aggregate_intent = _extract_aggregate_intent(user_query)
+    if aggregate_intent is None and _extract_report_intent(user_query):
+        report_event_hint = _extract_event_hint(user_query) or {}
+        if (
+            report_event_hint.get("event_type") is not None
+            and _extract_frame_hint(user_query) is None
+            and _extract_relation_hint(user_query) is None
+            and not _has_explicit_order_selector(user_query)
+        ):
+            aggregate_intent = "list"
+
     if aggregate_intent is None:
         return None
 
@@ -522,8 +542,12 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
     if not user_query or not user_query.strip():
         raise ValueError("user_query must be a non-empty string.")
 
+    wants_report = _extract_report_intent(user_query)
     aggregate_result = _resolve_aggregate_query(user_query)
     if aggregate_result is not None:
+        aggregate_result["context"]["explanation"] = build_explanation(aggregate_result)
+        if wants_report:
+            aggregate_result["context"]["report"] = build_report(aggregate_result)
         return aggregate_result
 
     frame_hint = _extract_frame_hint(user_query)
@@ -538,7 +562,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
             if metrics_result:
                 metrics_result["requested_metric"] = metric_hint["metric"]
 
-        return {
+        result = {
             "coordinates": tracking_result,
             "sequence": None,
             "context": {
@@ -549,6 +573,48 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 "mode": "frame",
             },
         }
+        result["context"]["explanation"] = build_explanation(result)
+        if wants_report:
+            result["context"]["report"] = build_report(result)
+        return result
+
+    if sequence_hint is None and event_hint is not None and event_hint.get("event_type") is not None:
+        resolved_event = find_event(
+            event_type=event_hint["event_type"],
+            team=event_hint.get("team"),
+            subtype_contains=event_hint.get("subtype_contains"),
+            occurrence=event_hint.get("occurrence", 1),
+            order=event_hint.get("order", "first"),
+            relation=event_hint.get("relation", "exact"),
+            anchor_frame=event_hint.get("anchor_frame"),
+            period=event_hint.get("period"),
+            pitch_zone=event_hint.get("pitch_zone"),
+            phase=event_hint.get("phase"),
+        )
+        resolved_frame = int(resolved_event["frame"])
+        tracking_result = get_tracking_frame(resolved_frame)
+        tracking_sequence = get_event_tracking_window(event_frame=resolved_frame)
+        metrics_result: dict[str, Any] | None = None
+        if metric_hint is not None:
+            metrics_result = get_frame_team_metrics(frame=resolved_frame, team=metric_hint.get("team"))
+            if metrics_result:
+                metrics_result["requested_metric"] = metric_hint["metric"]
+
+        result = {
+            "coordinates": tracking_result,
+            "sequence": tracking_sequence,
+            "context": {
+                "query": user_query,
+                "frame": resolved_frame,
+                "event": resolved_event,
+                "metrics": metrics_result,
+                "mode": "event",
+            },
+        }
+        result["context"]["explanation"] = build_explanation(result)
+        if wants_report:
+            result["context"]["report"] = build_report(result)
+        return result
 
     if sequence_hint is not None:
         anchor_hint = dict(sequence_hint["anchor"])
@@ -586,7 +652,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
             if metrics_result:
                 metrics_result["requested_metric"] = metric_hint["metric"]
 
-        return {
+        result = {
             "coordinates": tracking_result,
             "sequence": tracking_sequence,
             "context": {
@@ -598,6 +664,10 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 "mode": "sequence_event",
             },
         }
+        result["context"]["explanation"] = build_explanation(result)
+        if wants_report:
+            result["context"]["report"] = build_report(result)
+        return result
 
     user_content = _build_user_content(user_query)
 
@@ -660,7 +730,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 if metrics_result:
                     metrics_result["requested_metric"] = metric_hint["metric"]
 
-            return {
+            result = {
                 "coordinates": tracking_result,
                 "sequence": tracking_sequence,
                 "context": {
@@ -671,6 +741,10 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                     "mode": "event" if resolved_event is not None else "frame",
                 },
             }
+            result["context"]["explanation"] = build_explanation(result)
+            if wants_report:
+                result["context"]["report"] = build_report(result)
+            return result
 
     raise RuntimeError("Max tool iterations reached before resolving tracking coordinates.")
 

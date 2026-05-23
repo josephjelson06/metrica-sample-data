@@ -122,6 +122,8 @@ And from those queries it can already return:
 - pitch-zone filters
 - phase labels
 - team shape metrics
+- plain-English explanations
+- short report-style summaries when requested
 
 ## What this means in practical terms
 
@@ -140,6 +142,8 @@ It is now capable of:
 - phase-aware event analysis
 - frame-based tactical metrics
 - first-level event-to-event reasoning
+- deterministic explanation output
+- first report-generation output
 
 ## Where we can go next from here
 
@@ -189,8 +193,9 @@ Right now, this project is in a strong middle stage:
 - the replay pipeline is working
 - tactical metric support has started
 - phase and sequence reasoning have started
-- explanation and reporting layers are now the next major frontier
+- explanation and reporting output have started
+- richer tactical explanation and stronger comparison logic are now the next major frontier
 
 ## One-line summary
 
-This project is no longer just a football data viewer. It is already a working football intelligence system that can turn natural-language questions into frame retrieval, event reasoning, replay context, tactical metrics, and structured outputs built from the data already in hand.
+This project is no longer just a football data viewer. It is already a working football intelligence system that can turn natural-language questions into frame retrieval, event reasoning, replay context, tactical metrics, explanations, and structured outputs built from the data already in hand.
