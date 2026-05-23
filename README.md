@@ -27,6 +27,7 @@ Main project documents:
 
 - [Current Project Status](C:/Users/josep/OneDrive/Desktop/sample-data/docs/Current_Project_Status.md)
 - [Maximum Intelligence Extractable From Current Data](C:/Users/josep/OneDrive/Desktop/sample-data/docs/Maximum_Intelligence_Extractable_From_Current_Data.md)
+- [Backend Phase 1 Completion Criteria](C:/Users/josep/OneDrive/Desktop/sample-data/docs/Backend_Phase_1_Completion_Criteria.md)
 
 Supporting archived documents:
 
