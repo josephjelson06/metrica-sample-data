@@ -142,6 +142,30 @@ def _comparison_delta_line(comparison_metrics: dict[str, Any]) -> str | None:
     )
 
 
+def _sequence_comparison_line(sequence_comparison: dict[str, Any]) -> str | None:
+    deltas = sequence_comparison.get("deltas", {})
+    if not deltas:
+        return None
+
+    parts: list[str] = []
+    before_delta = deltas.get("same_team_before_count")
+    if before_delta is not None:
+        parts.append(f"lead-in same-team events {_format_signed_delta(float(before_delta))}")
+    after_delta = deltas.get("same_team_after_count")
+    if after_delta is not None:
+        parts.append(f"follow-up same-team events {_format_signed_delta(float(after_delta))}")
+    continuation_delta = deltas.get("continuation_count_before_opponent")
+    if continuation_delta is not None:
+        parts.append(f"continuation-before-opponent {_format_signed_delta(float(continuation_delta))}")
+    opponent_after_delta = deltas.get("opponent_after_count")
+    if opponent_after_delta is not None:
+        parts.append(f"opponent follow-up events {_format_signed_delta(float(opponent_after_delta))}")
+
+    if not parts:
+        return None
+    return "Sequence comparison deltas: " + ", ".join(parts) + "."
+
+
 def _build_comparison_explanation(context: dict[str, Any]) -> str:
     comparison = context.get("comparison", {})
     left_label = comparison.get("left_label", "the first moment")
@@ -172,6 +196,10 @@ def _build_comparison_explanation(context: dict[str, Any]) -> str:
             lines.append(home_delta_line)
         if away_delta_line:
             lines.append(away_delta_line)
+
+    sequence_comparison_line = _sequence_comparison_line(comparison.get("sequence_comparison", {}))
+    if sequence_comparison_line:
+        lines.append(sequence_comparison_line)
 
     return " ".join(lines)
 

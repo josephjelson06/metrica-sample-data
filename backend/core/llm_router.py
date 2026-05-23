@@ -11,6 +11,7 @@ from groq import Groq
 
 from backend.core.presenter import build_explanation, build_report
 from backend.tools.db_engine import (
+    compare_sequence_segments,
     compare_frame_structures,
     count_events,
     find_event,
@@ -739,7 +740,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
     metric_hint = _extract_metric_hint(user_query)
     comparison_hint = _extract_comparison_query(user_query)
     sequence_hint = _extract_sequence_event_query(user_query)
-    if buildup_intent and event_hint is not None and event_hint.get("event_type") is not None:
+    if comparison_hint is None and buildup_intent and event_hint is not None and event_hint.get("event_type") is not None:
         resolved_event = find_event(
             event_type=event_hint["event_type"],
             team=event_hint.get("team"),
@@ -785,7 +786,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
             result["context"]["report"] = build_report(result)
         return result
 
-    if transition_intent and event_hint is not None and event_hint.get("event_type") is not None:
+    if comparison_hint is None and transition_intent and event_hint is not None and event_hint.get("event_type") is not None:
         resolved_event = find_event(
             event_type=event_hint["event_type"],
             team=event_hint.get("team"),
@@ -844,9 +845,9 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
         left_reference = _resolve_reference(comparison_hint["left"])
         right_reference = _resolve_reference(comparison_hint["right"])
         comparison_team = comparison_hint.get("team")
+        left_event = left_reference.get("event")
+        right_event = right_reference.get("event")
         if comparison_team is None:
-            left_event = left_reference.get("event")
-            right_event = right_reference.get("event")
             if (
                 left_event is not None
                 and right_event is not None
@@ -854,6 +855,33 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 and left_event.get("team") in {"Home", "Away"}
             ):
                 comparison_team = str(left_event["team"])
+
+        sequence_comparison: dict[str, Any] | None = None
+        if buildup_intent or transition_intent:
+            if (
+                left_event is not None
+                and right_event is not None
+                and left_event.get("team") in {"Home", "Away"}
+                and right_event.get("team") in {"Home", "Away"}
+            ):
+                if buildup_intent:
+                    left_sequence = get_buildup_tracking_window(event_frame=int(left_reference["frame"]))
+                    right_sequence = get_buildup_tracking_window(event_frame=int(right_reference["frame"]))
+                else:
+                    left_sequence = get_transition_tracking_window(event_frame=int(left_reference["frame"]))
+                    right_sequence = get_transition_tracking_window(event_frame=int(right_reference["frame"]))
+
+                left_segments = segment_sequence_events(
+                    events=left_sequence.get("events", []),
+                    anchor_frame=int(left_reference["frame"]),
+                    team=str(left_event["team"]),
+                )
+                right_segments = segment_sequence_events(
+                    events=right_sequence.get("events", []),
+                    anchor_frame=int(right_reference["frame"]),
+                    team=str(right_event["team"]),
+                )
+                sequence_comparison = compare_sequence_segments(left_segments, right_segments)
 
         metrics_comparison = compare_frame_structures(
             start_frame=int(left_reference["frame"]),
@@ -874,9 +902,11 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                     "right_label": right_reference["label"],
                     "left_frame": left_reference["frame"],
                     "right_frame": right_reference["frame"],
-                    "left_event": left_reference.get("event"),
-                    "right_event": right_reference.get("event"),
+                    "left_event": left_event,
+                    "right_event": right_event,
                     "metrics_comparison": metrics_comparison,
+                    "sequence_comparison": sequence_comparison,
+                    "comparison_kind": "buildup_sequence" if buildup_intent else ("transition_sequence" if transition_intent else "moment"),
                 },
             },
         }

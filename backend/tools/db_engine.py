@@ -960,6 +960,36 @@ def summarize_team_event_chain(events: list[dict[str, Any]], team: str, anchor_f
     }
 
 
+def compare_sequence_segments(
+    left_segments: dict[str, Any],
+    right_segments: dict[str, Any],
+) -> dict[str, Any]:
+    comparable_counts = [
+        "before_events_count",
+        "after_events_count",
+        "same_team_before_count",
+        "same_team_after_count",
+        "opponent_before_count",
+        "opponent_after_count",
+        "continuation_count_before_opponent",
+    ]
+
+    deltas: dict[str, int | None] = {}
+    for metric_name in comparable_counts:
+        left_value = left_segments.get(metric_name)
+        right_value = right_segments.get(metric_name)
+        if left_value is None or right_value is None:
+            deltas[metric_name] = None
+            continue
+        deltas[metric_name] = int(right_value) - int(left_value)
+
+    return {
+        "left_segments": left_segments,
+        "right_segments": right_segments,
+        "deltas": deltas,
+    }
+
+
 def get_events_in_window(start_frame: int, end_frame: int, limit: int = 24) -> list[dict[str, Any]]:
     if not isinstance(start_frame, int) or not isinstance(end_frame, int):
         raise TypeError("start_frame and end_frame must be integers.")

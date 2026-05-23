@@ -141,6 +141,8 @@ Examples:
 - compare two buildups
 - compare two transitions
 
+This has now started, but it still needs refinement before it feels complete.
+
 ### 3. Better tactical explanation quality
 
 Right now the system can explain:
