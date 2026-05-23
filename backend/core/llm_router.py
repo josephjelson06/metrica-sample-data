@@ -18,7 +18,9 @@ from backend.tools.db_engine import (
     get_event_tracking_window,
     get_frame_team_metrics,
     get_tracking_frame,
+    get_transition_tracking_window,
     list_events,
+    summarize_team_event_chain,
 )
 
 
@@ -165,6 +167,8 @@ EVENT_PATTERNS = [
     {"pattern": r"\bpenalt(?:y|ies)\b", "event_type": "SET PIECE", "subtype_contains": "PENALTY"},
     {"pattern": r"\boffside\b", "event_type": "BALL LOST", "subtype_contains": "OFFSIDE"},
     {"pattern": r"\bball out\b", "event_type": "BALL OUT", "subtype_contains": None},
+    {"pattern": r"\b(ball win|win the ball|ball won)\b", "event_type": "RECOVERY", "subtype_contains": None},
+    {"pattern": r"\b(ball loss|lose the ball|lost the ball|turnover)\b", "event_type": "BALL LOST", "subtype_contains": None},
     {"pattern": r"\brecover(?:y|ies)?\b", "event_type": "RECOVERY", "subtype_contains": None},
     {"pattern": r"\binterception(?:s)?\b", "event_type": "RECOVERY", "subtype_contains": "INTERCEPTION"},
     {"pattern": r"\bpass(?:es)?\b", "event_type": "PASS", "subtype_contains": None},
@@ -349,6 +353,16 @@ def _extract_buildup_intent(user_query: str) -> bool:
         user_query,
         flags=re.IGNORECASE,
     ) is not None
+
+
+def _extract_transition_intent(user_query: str) -> bool:
+    has_transition_phrase = re.search(
+        r"\b(transition|counter(?:-|\s)?attack|attack sequence)\b",
+        user_query,
+        flags=re.IGNORECASE,
+    ) is not None
+    has_direction_phrase = re.search(r"\b(after|from)\b", user_query, flags=re.IGNORECASE) is not None
+    return has_transition_phrase and has_direction_phrase
 
 
 def _event_comparison_label(event_pattern: dict[str, Any]) -> str:
@@ -710,7 +724,8 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
 
     wants_report = _extract_report_intent(user_query)
     buildup_intent = _extract_buildup_intent(user_query)
-    if not buildup_intent:
+    transition_intent = _extract_transition_intent(user_query)
+    if not buildup_intent and not transition_intent:
         aggregate_result = _resolve_aggregate_query(user_query)
         if aggregate_result is not None:
             aggregate_result["context"]["explanation"] = build_explanation(aggregate_result)
@@ -754,6 +769,53 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 "event": resolved_event,
                 "metrics": metrics_result,
                 "mode": "buildup",
+            },
+        }
+        result["context"]["explanation"] = build_explanation(result)
+        if wants_report:
+            result["context"]["report"] = build_report(result)
+        return result
+
+    if transition_intent and event_hint is not None and event_hint.get("event_type") is not None:
+        resolved_event = find_event(
+            event_type=event_hint["event_type"],
+            team=event_hint.get("team"),
+            subtype_contains=event_hint.get("subtype_contains"),
+            occurrence=event_hint.get("occurrence", 1),
+            order=event_hint.get("order", "first"),
+            relation=event_hint.get("relation", "exact"),
+            anchor_frame=event_hint.get("anchor_frame"),
+            period=event_hint.get("period"),
+            pitch_zone=event_hint.get("pitch_zone"),
+            phase=event_hint.get("phase"),
+        )
+        resolved_frame = int(resolved_event["frame"])
+        tracking_result = get_tracking_frame(resolved_frame)
+        transition_sequence = get_transition_tracking_window(event_frame=resolved_frame)
+        metrics_result: dict[str, Any] | None = None
+        if metric_hint is not None:
+            metrics_result = get_frame_team_metrics(frame=resolved_frame, team=metric_hint.get("team"))
+            if metrics_result:
+                metrics_result["requested_metric"] = metric_hint["metric"]
+
+        transition_summary: dict[str, Any] | None = None
+        if resolved_event.get("team") in {"Home", "Away"}:
+            transition_summary = summarize_team_event_chain(
+                events=transition_sequence.get("events", []),
+                team=str(resolved_event["team"]),
+                anchor_frame=resolved_frame,
+            )
+
+        result = {
+            "coordinates": tracking_result,
+            "sequence": transition_sequence,
+            "context": {
+                "query": user_query,
+                "frame": resolved_frame,
+                "event": resolved_event,
+                "metrics": metrics_result,
+                "transition_summary": transition_summary,
+                "mode": "transition",
             },
         }
         result["context"]["explanation"] = build_explanation(result)

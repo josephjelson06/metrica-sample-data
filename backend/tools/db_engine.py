@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 import time
 from math import hypot
 from pathlib import Path
@@ -789,6 +790,63 @@ def get_buildup_tracking_window(
     )
     window["sequence_type"] = "buildup"
     return window
+
+
+def get_transition_tracking_window(
+    event_frame: int,
+    frames_before: int = FRAMES_PER_SECOND * 1,
+    frames_after: int = FRAMES_PER_SECOND * 8,
+    frame_step: int = 1,
+) -> dict[str, Any]:
+    window = get_event_tracking_window(
+        event_frame=event_frame,
+        frames_before=frames_before,
+        frames_after=frames_after,
+        frame_step=frame_step,
+    )
+    window["sequence_type"] = "transition"
+    return window
+
+
+def summarize_team_event_chain(events: list[dict[str, Any]], team: str, anchor_frame: int) -> dict[str, Any]:
+    normalized_team = str(team).strip().title()
+    if normalized_team not in {"Home", "Away"}:
+        raise ValueError("team must be either 'Home' or 'Away'.")
+
+    team_events = [
+        event
+        for event in events
+        if event.get("team") == normalized_team and int(event.get("start_frame", event.get("frame", 0))) >= anchor_frame
+    ]
+    if not team_events:
+        return {
+            "team": normalized_team,
+            "anchor_frame": anchor_frame,
+            "event_count": 0,
+            "counts_by_type": {},
+            "window_seconds": 0.0,
+            "first_shot_seconds_from_anchor": None,
+            "last_event_type": None,
+        }
+
+    counts_by_type = Counter(str(event.get("type", "EVENT")).upper() for event in team_events)
+    first_shot = next((event for event in team_events if str(event.get("type", "")).upper() == "SHOT"), None)
+    first_shot_seconds_from_anchor = None
+    if first_shot is not None:
+        first_shot_seconds_from_anchor = (
+            int(first_shot["start_frame"]) - anchor_frame
+        ) / FRAMES_PER_SECOND
+
+    last_event = team_events[-1]
+    return {
+        "team": normalized_team,
+        "anchor_frame": anchor_frame,
+        "event_count": len(team_events),
+        "counts_by_type": dict(counts_by_type),
+        "window_seconds": (int(last_event["start_frame"]) - anchor_frame) / FRAMES_PER_SECOND,
+        "first_shot_seconds_from_anchor": first_shot_seconds_from_anchor,
+        "last_event_type": str(last_event.get("type", "")).upper() or None,
+    }
 
 
 def get_events_in_window(start_frame: int, end_frame: int, limit: int = 24) -> list[dict[str, Any]]:

@@ -7,6 +7,7 @@ from backend.tools.db_engine import (
     compare_frame_structures,
     compare_team_metrics_between_frames,
     get_frame_team_metrics,
+    summarize_team_event_chain,
 )
 
 
@@ -174,6 +175,39 @@ def _build_buildup_event_mix_line(sequence: dict[str, Any] | None) -> str | None
     return f"The buildup event mix is led by {mix_text}."
 
 
+def _build_transition_chain_line(context: dict[str, Any], sequence: dict[str, Any] | None) -> str | None:
+    event = context.get("event")
+    if not sequence or not event or event.get("team") not in {"Home", "Away"}:
+        return None
+
+    transition_summary = context.get("transition_summary")
+    if transition_summary is None:
+        transition_summary = summarize_team_event_chain(
+            events=sequence.get("events", []),
+            team=str(event["team"]),
+            anchor_frame=int(event["frame"]),
+        )
+
+    if not transition_summary or int(transition_summary.get("event_count", 0)) == 0:
+        return f"No same-team follow-up events were recorded for {event.get('team')} inside this transition window."
+
+    counts_by_type = transition_summary.get("counts_by_type", {})
+    ordered_counts = sorted(counts_by_type.items(), key=lambda item: (-item[1], item[0]))
+    top_counts = ", ".join(
+        f"{count} {event_type.lower()}" for event_type, count in ordered_counts[:3]
+    )
+    line = f"After the trigger, {transition_summary['team']} produced {transition_summary['event_count']} same-team events"
+    if float(transition_summary["window_seconds"]) > 0:
+        line += f" across {transition_summary['window_seconds']:.1f} seconds"
+    line += f", led by {top_counts}."
+    first_shot_seconds = transition_summary.get("first_shot_seconds_from_anchor")
+    if first_shot_seconds is not None:
+        line += f" The first shot arrived {float(first_shot_seconds):.1f} seconds after the trigger."
+    elif transition_summary.get("last_event_type"):
+        line += f" The sequence ended with {str(transition_summary['last_event_type']).lower()}."
+    return line
+
+
 def build_explanation(analysis_result: dict[str, Any]) -> str:
     context = analysis_result["context"]
     mode = context.get("mode")
@@ -219,6 +253,8 @@ def build_explanation(analysis_result: dict[str, Any]) -> str:
 
     if mode == "buildup":
         lines.append("This response focuses on the longer lead-up into the key event, not just the immediate replay clip.")
+    elif mode == "transition":
+        lines.append("This response focuses on the immediate phase after the trigger event to capture the transition sequence.")
 
     if context.get("anchor_event") is not None:
         anchor_event = context["anchor_event"]
@@ -238,6 +274,10 @@ def build_explanation(analysis_result: dict[str, Any]) -> str:
     buildup_mix_line = _build_buildup_event_mix_line(sequence if mode == "buildup" else None)
     if buildup_mix_line:
         lines.append(buildup_mix_line)
+
+    transition_chain_line = _build_transition_chain_line(context, sequence if mode == "transition" else None)
+    if transition_chain_line:
+        lines.append(transition_chain_line)
 
     metric_line = _metric_focus_line(metrics)
     if metric_line:
