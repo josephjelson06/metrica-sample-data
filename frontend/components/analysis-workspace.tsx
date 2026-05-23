@@ -352,6 +352,47 @@ function renderSequenceSegmentsPanel(sequenceSegments: SequenceSegments | null |
   );
 }
 
+function renderCountMapEntries(
+  title: string,
+  countMap: Record<string, number> | null | undefined,
+) {
+  if (!countMap || Object.keys(countMap).length === 0) {
+    return null;
+  }
+
+  return (
+    <div style={cardStyle()}>
+      <h3 style={sectionTitleStyle()}>{title}</h3>
+      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", marginTop: 12 }}>
+        {Object.entries(countMap)
+          .sort((left, right) => right[1] - left[1])
+          .map(([type, count]) => (
+            <div key={`${title}-${type}`}>
+              <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                {formatMetricLabel(type)}
+              </p>
+              <strong>{count}</strong>
+            </div>
+          ))}
+      </div>
+    </div>
+  );
+}
+
+function renderSequenceTypeBreakdown(sequenceSegments: SequenceSegments | null | undefined) {
+  if (!sequenceSegments) {
+    return null;
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+      {renderCountMapEntries("Before Event Mix", sequenceSegments.before_counts_by_type)}
+      {renderCountMapEntries("Anchor Event Mix", sequenceSegments.anchor_counts_by_type)}
+      {renderCountMapEntries("After Event Mix", sequenceSegments.after_counts_by_type)}
+    </div>
+  );
+}
+
 function renderComparisonPanel(
   comparison: ComparisonContext | null | undefined,
   onOpenComparisonFrame: ((frame: number) => void) | null,
@@ -550,6 +591,22 @@ function renderTransitionSummaryPanel(transitionSummary: AnalysisContext["transi
           </strong>
         </div>
       </div>
+      {transitionSummary.counts_by_type && Object.keys(transitionSummary.counts_by_type).length > 0 ? (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
+            {Object.entries(transitionSummary.counts_by_type)
+              .sort((left, right) => right[1] - left[1])
+              .map(([type, count]) => (
+                <div key={`transition-${type}`}>
+                  <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                    {formatMetricLabel(type)}
+                  </p>
+                  <strong>{count}</strong>
+                </div>
+              ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -721,6 +778,21 @@ function renderPrimarySummary(context: AnalysisContext | null, activeFrame: numb
   return "Waiting for your first query.";
 }
 
+function renderQueryContextPanel(context: AnalysisContext | null) {
+  if (!context) {
+    return null;
+  }
+
+  return (
+    <div style={cardStyle()}>
+      <h3 style={sectionTitleStyle()}>Query Context</h3>
+      <p style={{ margin: "12px 0 0", color: "var(--ink)", lineHeight: 1.7 }}>
+        {context.query}
+      </p>
+    </div>
+  );
+}
+
 function renderResultSurface(
   context: AnalysisContext | null,
   displayedCoordinates: CoordinateMap | null,
@@ -785,12 +857,14 @@ function renderResultSurface(
         {renderEventContextPanel("Primary Event", context.event, onOpenEventFrame)}
         {renderEventContextPanel("Anchor Event", context.anchor_event ?? null, onOpenEventFrame)}
       </div>
+      {renderQueryContextPanel(context)}
       {renderMetricGrid(context.metrics)}
       {renderTransitionSummaryPanel(context.transition_summary)}
       {renderSequenceSegmentsPanel(
         context.sequence_segments,
         context.mode === "buildup" ? "Buildup Segmentation" : context.mode === "transition" ? "Transition Segmentation" : "Sequence Segmentation",
       )}
+      {renderSequenceTypeBreakdown(context.sequence_segments)}
       {sequenceEvents.length > 0 && replaySequence ? (
         <div style={cardStyle()}>
           <h3 style={sectionTitleStyle()}>Sequence Events</h3>
