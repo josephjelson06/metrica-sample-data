@@ -93,6 +93,14 @@ function getSequenceEventLabel(event: SequenceEvent) {
   return event.type;
 }
 
+function getEventDisplayLabel(event: AnalysisContext["event"] | ComparisonContext["left_event"]) {
+  if (!event) {
+    return "Unknown event";
+  }
+
+  return event.subtype ? `${event.type} / ${event.subtype}` : event.type;
+}
+
 function cardStyle() {
   return {
     borderRadius: 18,
@@ -260,7 +268,7 @@ function renderAggregatePanel(
           {aggregate.query_type === "count" ? `${aggregate.count} matches` : `${aggregate.count} listed events`}
         </h3>
         {filterTokens.length > 0 ? (
-          <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.5 }}>{filterTokens.join(" • ")}</p>
+          <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.5 }}>{filterTokens.join(" | ")}</p>
         ) : null}
       </div>
 
@@ -363,6 +371,31 @@ function renderComparisonPanel(
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
+      <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+        <div style={cardStyle()}>
+          <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Left Moment
+          </p>
+          <h3 style={{ margin: "6px 0 8px", fontSize: "1.1rem" }}>{comparison.left_label}</h3>
+          <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.6 }}>
+            {comparison.left_event
+              ? `${comparison.left_event.team ?? "Unknown"} ${getEventDisplayLabel(comparison.left_event)} at ${formatMatchTime(comparison.left_event.start_time_s)}`
+              : `Frame ${comparison.left_frame}`}
+          </p>
+        </div>
+        <div style={cardStyle()}>
+          <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Right Moment
+          </p>
+          <h3 style={{ margin: "6px 0 8px", fontSize: "1.1rem" }}>{comparison.right_label}</h3>
+          <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.6 }}>
+            {comparison.right_event
+              ? `${comparison.right_event.team ?? "Unknown"} ${getEventDisplayLabel(comparison.right_event)} at ${formatMatchTime(comparison.right_event.start_time_s)}`
+              : `Frame ${comparison.right_frame}`}
+          </p>
+        </div>
+      </div>
+
       <div style={cardStyle()}>
         <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
           Comparison
@@ -419,6 +452,121 @@ function renderComparisonPanel(
   );
 }
 
+function renderEventContextPanel(title: string, eventContext: AnalysisContext["event"] | null | undefined) {
+  if (!eventContext) {
+    return null;
+  }
+
+  return (
+    <div style={cardStyle()}>
+      <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+        {title}
+      </p>
+      <h3 style={{ margin: "6px 0 8px", fontSize: "1.1rem" }}>
+        {eventContext.team ?? "Unknown"} {getEventDisplayLabel(eventContext)}
+      </h3>
+      <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
+        <div>
+          <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Frame
+          </p>
+          <strong>{eventContext.frame}</strong>
+        </div>
+        <div>
+          <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Time
+          </p>
+          <strong>{formatMatchTime(eventContext.start_time_s)}</strong>
+        </div>
+        <div>
+          <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Relation
+          </p>
+          <strong>{eventContext.relation}</strong>
+        </div>
+        {eventContext.phase ? (
+          <div>
+            <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              Phase
+            </p>
+            <strong>{eventContext.phase.replace(/_/g, " ")}</strong>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function renderTransitionSummaryPanel(transitionSummary: AnalysisContext["transition_summary"] | null | undefined) {
+  if (!transitionSummary) {
+    return null;
+  }
+
+  return (
+    <div style={cardStyle()}>
+      <h3 style={sectionTitleStyle()}>Transition Summary</h3>
+      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", marginTop: 12 }}>
+        <div>
+          <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Team
+          </p>
+          <strong>{transitionSummary.team}</strong>
+        </div>
+        <div>
+          <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Window
+          </p>
+          <strong>{transitionSummary.window_seconds.toFixed(1)}s</strong>
+        </div>
+        <div>
+          <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Events
+          </p>
+          <strong>{transitionSummary.event_count}</strong>
+        </div>
+        <div>
+          <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            First shot
+          </p>
+          <strong>
+            {transitionSummary.first_shot_seconds_from_anchor == null
+              ? "No shot"
+              : `${transitionSummary.first_shot_seconds_from_anchor.toFixed(1)}s`}
+          </strong>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function renderReportBody(report: string) {
+  const blocks = report
+    .split(/\r?\n\r?\n/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  return blocks.map((block, index) => {
+    const lines = block.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const isList = lines.every((line) => /^[-*]\s+/.test(line));
+
+    if (isList) {
+      return (
+        <ul key={`report-list-${index}`} style={{ margin: "0 0 0 18px", padding: 0, lineHeight: 1.7 }}>
+          {lines.map((line, lineIndex) => (
+            <li key={`report-list-line-${lineIndex}`}>{line.replace(/^[-*]\s+/, "")}</li>
+          ))}
+        </ul>
+      );
+    }
+
+    return (
+      <p key={`report-paragraph-${index}`} style={{ margin: 0, lineHeight: 1.7 }}>
+        {lines.join(" ")}
+      </p>
+    );
+  });
+}
+
 function renderExplanationPanel(context: AnalysisContext | null) {
   if (!context?.explanation) {
     return null;
@@ -440,17 +588,17 @@ function renderReportPanel(context: AnalysisContext | null) {
   return (
     <div style={cardStyle()}>
       <h3 style={sectionTitleStyle()}>Report</h3>
-      <pre
+      <div
         style={{
-          margin: "12px 0 0",
-          whiteSpace: "pre-wrap",
-          lineHeight: 1.65,
+          display: "grid",
+          gap: 12,
+          marginTop: 12,
           color: "var(--ink)",
           fontFamily: "var(--font-ui), sans-serif",
         }}
       >
-        {context.report}
-      </pre>
+        {renderReportBody(context.report)}
+      </div>
     </div>
   );
 }
@@ -605,7 +753,12 @@ function renderResultSurface(
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
+      <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
+        {renderEventContextPanel("Primary Event", context.event)}
+        {renderEventContextPanel("Anchor Event", context.anchor_event ?? null)}
+      </div>
       {renderMetricGrid(context.metrics)}
+      {renderTransitionSummaryPanel(context.transition_summary)}
       {renderSequenceSegmentsPanel(
         context.sequence_segments,
         context.mode === "buildup" ? "Buildup Segmentation" : context.mode === "transition" ? "Transition Segmentation" : "Sequence Segmentation",
