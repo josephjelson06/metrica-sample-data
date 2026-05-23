@@ -328,6 +328,28 @@ function renderAggregatePanel(
   );
 }
 
+function renderAggregateInsightsPanel(aggregate: AggregateContext | null | undefined) {
+  if (!aggregate?.events || aggregate.events.length === 0) {
+    return null;
+  }
+
+  const countsByTeam: Record<string, number> = {};
+  const countsByType: Record<string, number> = {};
+
+  for (const event of aggregate.events) {
+    const teamKey = event.team ?? "Unknown";
+    countsByTeam[teamKey] = (countsByTeam[teamKey] ?? 0) + 1;
+    countsByType[event.type] = (countsByType[event.type] ?? 0) + 1;
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+      {renderCountMapEntries("Events By Team", countsByTeam)}
+      {renderCountMapEntries("Events By Type", countsByType)}
+    </div>
+  );
+}
+
 function renderSequenceSegmentsPanel(sequenceSegments: SequenceSegments | null | undefined, title: string) {
   if (!sequenceSegments) {
     return null;
@@ -398,6 +420,114 @@ function renderSequenceTypeBreakdown(sequenceSegments: SequenceSegments | null |
       {renderCountMapEntries("Before Event Mix", sequenceSegments.before_counts_by_type)}
       {renderCountMapEntries("Anchor Event Mix", sequenceSegments.anchor_counts_by_type)}
       {renderCountMapEntries("After Event Mix", sequenceSegments.after_counts_by_type)}
+    </div>
+  );
+}
+
+function readEventRecordStringValue(record: Record<string, unknown> | null | undefined, keys: string[]) {
+  if (!record) {
+    return null;
+  }
+
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function readEventRecordNumberValue(record: Record<string, unknown> | null | undefined, keys: string[]) {
+  if (!record) {
+    return null;
+  }
+
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function renderSequenceHighlightCard(
+  title: string,
+  record: Record<string, unknown> | null | undefined,
+) {
+  if (!record) {
+    return null;
+  }
+
+  const team = readEventRecordStringValue(record, ["team"]);
+  const type = readEventRecordStringValue(record, ["type"]);
+  const subtype = readEventRecordStringValue(record, ["subtype"]);
+  const fromPlayer = readEventRecordStringValue(record, ["from_player", "from"]);
+  const frame = readEventRecordNumberValue(record, ["frame", "start_frame"]);
+  const timeSeconds = readEventRecordNumberValue(record, ["start_time_s", "time_s"]);
+
+  return (
+    <div style={cardStyle()}>
+      <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+        {title}
+      </p>
+      <h3 style={{ margin: "6px 0 8px", fontSize: "1.05rem" }}>
+        {[team, type, subtype].filter(Boolean).join(" ")}
+      </h3>
+      <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}>
+        {frame != null ? (
+          <div>
+            <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              Frame
+            </p>
+            <strong>{frame}</strong>
+          </div>
+        ) : null}
+        {timeSeconds != null ? (
+          <div>
+            <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              Time
+            </p>
+            <strong>{formatMatchTime(timeSeconds)}</strong>
+          </div>
+        ) : null}
+        {fromPlayer ? (
+          <div>
+            <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              From
+            </p>
+            <strong>{fromPlayer}</strong>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function renderSequenceHighlightsPanel(sequenceSegments: SequenceSegments | null | undefined) {
+  if (!sequenceSegments) {
+    return null;
+  }
+
+  const cards = [
+    renderSequenceHighlightCard("Immediate Pre-Event", sequenceSegments.immediate_pre_event),
+    renderSequenceHighlightCard("Immediate Post-Event", sequenceSegments.immediate_post_event),
+    renderSequenceHighlightCard("Last Same-Team Action Before", sequenceSegments.last_same_team_before_event),
+    renderSequenceHighlightCard("First Same-Team Action After", sequenceSegments.first_same_team_after_event),
+    renderSequenceHighlightCard("First Opponent Action After", sequenceSegments.first_opponent_after_event),
+    renderSequenceHighlightCard("First Same-Team Shot After", sequenceSegments.first_same_team_shot_after),
+  ].filter(Boolean);
+
+  if (cards.length === 0) {
+    return null;
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+      {cards}
     </div>
   );
 }
@@ -498,6 +628,37 @@ function renderComparisonPanel(
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function renderComparisonInsightPanel(comparison: ComparisonContext | null | undefined) {
+  if (!comparison?.sequence_comparison?.deltas) {
+    return null;
+  }
+
+  const prominentDeltas = Object.entries(comparison.sequence_comparison.deltas)
+    .filter(([, value]) => typeof value === "number" && value !== 0)
+    .sort((left, right) => Math.abs(right[1] as number) - Math.abs(left[1] as number))
+    .slice(0, 4);
+
+  if (prominentDeltas.length === 0) {
+    return null;
+  }
+
+  return (
+    <div style={cardStyle()}>
+      <h3 style={sectionTitleStyle()}>Largest Sequence Changes</h3>
+      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", marginTop: 12 }}>
+        {prominentDeltas.map(([key, value]) => (
+          <div key={`comparison-delta-${key}`}>
+            <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              {formatMetricLabel(key)}
+            </p>
+            <strong>{typeof value === "number" ? value.toFixed(2) : String(value)}</strong>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -829,6 +990,7 @@ function renderResultSurface(
     return (
       <div style={{ display: "grid", gap: 14 }}>
         {renderAggregatePanel(context.aggregate, onOpenEventFrame)}
+        {renderAggregateInsightsPanel(context.aggregate)}
         {renderExplanationPanel(context)}
         {renderReportPanel(context, onCopyReport, reportCopied)}
       </div>
@@ -839,6 +1001,7 @@ function renderResultSurface(
     return (
       <div style={{ display: "grid", gap: 14 }}>
         {renderComparisonPanel(context.comparison, onOpenEventFrame)}
+        {renderComparisonInsightPanel(context.comparison)}
         {displayedCoordinates ? (
           <div style={{ ...cardStyle(), padding: 20 }}>
             <h3 style={sectionTitleStyle()}>Reference Pitch</h3>
@@ -874,6 +1037,7 @@ function renderResultSurface(
         context.mode === "buildup" ? "Buildup Segmentation" : context.mode === "transition" ? "Transition Segmentation" : "Sequence Segmentation",
       )}
       {renderSequenceTypeBreakdown(context.sequence_segments)}
+      {renderSequenceHighlightsPanel(context.sequence_segments)}
       {sequenceEvents.length > 0 && replaySequence ? (
         <div style={cardStyle()}>
           <h3 style={sectionTitleStyle()}>Sequence Events</h3>
@@ -912,6 +1076,7 @@ function renderResultSurface(
 
 export function AnalysisWorkspace() {
   const [reportCopied, setReportCopied] = useState(false);
+  const [isCompactLayout, setIsCompactLayout] = useState(false);
   const status = useAnalysisStore((state) => state.status);
   const query = useAnalysisStore((state) => state.query);
   const latestPayload = useAnalysisStore((state) => state.latestPayload);
@@ -956,6 +1121,18 @@ export function AnalysisWorkspace() {
     connect();
     return () => {
       disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    const syncLayout = () => {
+      setIsCompactLayout(window.innerWidth < 1160);
+    };
+
+    syncLayout();
+    window.addEventListener("resize", syncLayout);
+    return () => {
+      window.removeEventListener("resize", syncLayout);
     };
   }, []);
 
@@ -1008,7 +1185,7 @@ export function AnalysisWorkspace() {
         width: "min(1360px, calc(100vw - 32px))",
         margin: "24px auto",
         display: "grid",
-        gridTemplateColumns: "minmax(320px, 400px) minmax(0, 1fr)",
+        gridTemplateColumns: isCompactLayout ? "minmax(0, 1fr)" : "minmax(320px, 400px) minmax(0, 1fr)",
         gap: "24px",
       }}
     >
