@@ -23,6 +23,8 @@ from backend.tools.db_engine import (
     get_pass_network,
     get_pass_sonars,
     get_physicality_summary,
+    find_dangerous_transitions,
+    analyze_set_piece,
     list_events,
     segment_sequence_events,
     summarize_team_event_chain,
@@ -143,14 +145,62 @@ TOOLS = [
                     }
                 },
                 "required": ["frame"],
-            },
-        },
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_pass_network",
+            "description": "Calculate passing network nodes and edges for a given team.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "team": {"type": "string", "description": "Team name (e.g. 'Home' or 'Away')"},
+                    "period": {"type": "integer", "description": "Optional period (1 or 2)"}
+                },
+                "required": ["team"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_pass_sonars",
+            "description": "Calculate pass sonars (angular pass frequency) for a given team.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "team": {"type": "string", "description": "Team name (e.g. 'Home' or 'Away')"},
+                    "period": {"type": "integer", "description": "Optional period (1 or 2)"}
+                },
+                "required": ["team"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_physicality_summary",
+            "description": "Calculate total distance, HSR, and sprint distance per player.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "team": {"type": "string", "description": "Team name (e.g. 'Home' or 'Away')"},
+                    "period": {"type": "integer", "description": "Required period (1 or 2)"}
+                },
+                "required": ["team", "period"]
+            }
+        }
     },
 ]
 
 AVAILABLE_FUNCTIONS = {
     "find_event": find_event,
     "get_tracking_frame": get_tracking_frame,
+    "get_pass_network": get_pass_network,
+    "get_pass_sonars": get_pass_sonars,
+    "get_physicality_summary": get_physicality_summary,
 }
 
 ORDINAL_WORDS = {
@@ -381,6 +431,14 @@ def _extract_pass_sonars_intent(user_query: str) -> bool:
 def _extract_physicality_intent(user_query: str) -> bool:
     query = user_query.lower()
     return "physicality" in query or "work rate" in query or "distance run" in query or "sprint" in query or "hsr" in query
+
+def _extract_pattern_recognition_intent(user_query: str) -> bool:
+    query = user_query.lower()
+    return "dangerous transition" in query or "auto insight" in query or "pattern" in query or "vulnerability" in query
+
+def _extract_set_piece_intent(user_query: str) -> bool:
+    query = user_query.lower()
+    return "set piece analysis" in query or "analyze corner" in query or "marking" in query or "free kick structure" in query
 
 
 def _event_comparison_label(event_pattern: dict[str, Any]) -> str:
@@ -754,6 +812,8 @@ def _finalize_analysis_result(result: dict[str, Any], wants_report: bool) -> dic
     context["has_pass_network"] = result.get("pass_network") is not None
     context["has_pass_sonars"] = result.get("pass_sonars") is not None
     context["has_physicality"] = result.get("physicality") is not None
+    context["has_auto_insights"] = result.get("auto_insights") is not None
+    context["has_set_piece_analysis"] = result.get("set_piece_analysis") is not None
     context["has_report"] = wants_report
     context["explanation"] = build_explanation(result)
     context["has_explanation"] = True
@@ -825,6 +885,45 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
             },
         }
         return _finalize_analysis_result(result, wants_report)
+
+    pattern_intent = _extract_pattern_recognition_intent(user_query)
+    if pattern_intent:
+        team_hint = _extract_team_hint(user_query) or "Home"
+        insights = find_dangerous_transitions(team=team_hint)
+        result = {
+            "coordinates": {},
+            "sequence": None,
+            "auto_insights": insights,
+            "context": {
+                "query": user_query,
+                "frame": None,
+                "event": None,
+                "mode": "auto_insights",
+            },
+        }
+        return _finalize_analysis_result(result, wants_report)
+
+    set_piece_intent = _extract_set_piece_intent(user_query)
+    if set_piece_intent:
+        # Find the specific event they are asking for or just grab the first set piece
+        event_hint = _extract_event_hint(user_query)
+        team_hint = _extract_team_hint(user_query)
+        period_hint = _extract_period_hint(user_query)
+        target_events = list_events(event_type="SET PIECE", team=team_hint, period=period_hint, limit=1)
+        if target_events:
+            analysis = analyze_set_piece(str(target_events[0]["index"]))
+            result = {
+                "coordinates": analysis["coordinates"],
+                "sequence": None,
+                "set_piece_analysis": analysis,
+                "context": {
+                    "query": user_query,
+                    "frame": analysis["frame"],
+                    "event": analysis["event"],
+                    "mode": "set_piece",
+                },
+            }
+            return _finalize_analysis_result(result, wants_report)
 
     if not buildup_intent and not transition_intent:
         aggregate_result = _resolve_aggregate_query(user_query)
@@ -1119,6 +1218,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
     resolved_event: dict[str, Any] | None = None
     resolved_frame: int | None = frame_hint
     tracking_sequence: dict[str, Any] | None = None
+    synthesis_payloads: dict[str, Any] = {}
 
     for _ in range(MAX_TOOL_ITERATIONS):
         response = client.chat.completions.create(
@@ -1135,6 +1235,22 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
         messages.append(response_message.model_dump(exclude_none=True))
 
         if not tool_calls:
+            if synthesis_payloads:
+                result = {
+                    "coordinates": {},
+                    "sequence": tracking_sequence,
+                    "pass_network": synthesis_payloads.get("get_pass_network"),
+                    "pass_sonars": synthesis_payloads.get("get_pass_sonars"),
+                    "physicality": synthesis_payloads.get("get_physicality_summary"),
+                    "context": {
+                        "query": user_query,
+                        "frame": resolved_frame,
+                        "event": resolved_event,
+                        "mode": "synthesis",
+                        "explanation": response_message.content,
+                    },
+                }
+                return _finalize_analysis_result(result, wants_report)
             raise RuntimeError("The model did not request a database tool call.")
 
         tracking_result: dict[str, dict[str, float | int | None]] | None = None
@@ -1149,6 +1265,9 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 tracking_result = function_response
                 if resolved_frame is None:
                     resolved_frame = json.loads(tool_call.function.arguments or "{}").get("frame")
+                    
+            if function_name in ["get_pass_network", "get_pass_sonars", "get_physicality_summary"]:
+                synthesis_payloads[function_name] = function_response
 
             messages.append(
                 {
@@ -1159,7 +1278,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 }
             )
 
-        if tracking_result is not None:
+        if tracking_result is not None and not synthesis_payloads:
             if resolved_event is not None and resolved_frame is not None:
                 tracking_sequence = get_event_tracking_window(event_frame=resolved_frame)
 

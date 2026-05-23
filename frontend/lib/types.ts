@@ -182,6 +182,27 @@ export type PassSonarsData = {
   sonars: Record<string, PlayerSonar>;
 };
 
+export type AutoInsight = {
+  start_frame: number;
+  end_frame: number;
+  period: number;
+  start_time: number;
+  end_time: number;
+};
+
+export type MarkingPair = {
+  attacker: string;
+  defender: string;
+  distance: number;
+};
+
+export type SetPieceAnalysis = {
+  event: any;
+  frame: number;
+  marking_pairs: MarkingPair[];
+  coordinates: any;
+};
+
 export type ComparisonContext = {
   team: string | null;
   left_label: string;
@@ -205,7 +226,10 @@ export type AnalysisMode =
   | "transition"
   | "pass_network"
   | "pass_sonars"
-  | "physicality";
+  | "physicality"
+  | "synthesis"
+  | "auto_insights"
+  | "set_piece";
 
 export type AnalysisContext = {
   query: string;
@@ -233,6 +257,8 @@ export type AnalysisContext = {
   has_pass_network?: boolean;
   has_pass_sonars?: boolean;
   has_physicality?: boolean;
+  has_auto_insights?: boolean;
+  has_set_piece_analysis?: boolean;
   has_report?: boolean;
   has_explanation?: boolean;
 };
@@ -244,6 +270,8 @@ export type DataRenderPayload = {
   pass_network?: PassNetworkData | null;
   pass_sonars?: PassSonarsData | null;
   physicality?: PhysicalityData | null;
+  auto_insights?: AutoInsight[] | null;
+  set_piece_analysis?: SetPieceAnalysis | null;
   context: AnalysisContext;
 };
 

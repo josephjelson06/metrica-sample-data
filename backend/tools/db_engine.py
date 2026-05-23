@@ -1309,6 +1309,142 @@ def get_pass_sonars(team: str, period: int | None = None) -> dict[str, Any]:
     return {"team": normalized_team, "period": period, "sonars": sonars}
 
 
+def find_dangerous_transitions(team: str) -> list[dict[str, Any]]:
+    # This heuristic engine scans the tracking parquet to find moments where:
+    # 1. The team has players sprinting (speed > 6.0 m/s)
+    # 2. It happens quickly over a short window
+    # 3. We return the timestamp and frame.
+    normalized_team = _normalize_optional_team(team)
+    if not normalized_team:
+        raise ValueError("Team is required for pattern recognition.")
+        
+    connection = _connect()
+    try:
+        cols = _get_tracking_coordinate_columns(connection)
+        team_cols = [c for c in cols if c.startswith(normalized_team)]
+        players = set([c.rsplit("_", 1)[0] for c in team_cols])
+        
+        # Build an efficient duckdb query to find high velocity frames for the team
+        query = f"""
+        WITH player_data AS (
+            SELECT 
+                "Frame", "Period", "Time [s]" as t,
+        """
+        for i, player in enumerate(players):
+            query += f' "{player}_x" as x{i}, "{player}_y" as y{i},'
+        query = query.rstrip(",") + """
+            FROM read_parquet(?)
+        ),
+        velocities AS (
+            SELECT "Frame", "Period", t,
+        """
+        for i in range(len(players)):
+            query += f"""
+                SQRT(POWER((x{i} - LAG(x{i}) OVER (ORDER BY "Frame")) * 105.0, 2) + 
+                     POWER((y{i} - LAG(y{i}) OVER (ORDER BY "Frame")) * 68.0, 2)) / 
+                NULLIF((t - LAG(t) OVER (ORDER BY "Frame")), 0) as v{i},
+            """
+        query = query.rstrip(",\n ") + """
+            FROM player_data
+        )
+        SELECT "Frame", "Period", t
+        FROM velocities
+        WHERE (
+        """
+        conditions = [f"(v{i} > 6.5)" for i in range(len(players))]
+        query += " OR ".join(conditions) + """)
+        ORDER BY "Frame" ASC
+        """
+        
+        rows = connection.execute(query, [str(TRACKING_PARQUET_PATH)]).fetchall()
+        
+        # Group contiguous frames into transition events
+        transitions = []
+        current_transition = None
+        
+        for row in rows:
+            frame = int(row[0])
+            period = int(row[1])
+            time_s = float(row[2])
+            
+            if current_transition is None:
+                current_transition = {"start_frame": frame, "end_frame": frame, "period": period, "start_time": time_s, "end_time": time_s}
+            else:
+                if frame - current_transition["end_frame"] < 25: # Within 1 second (at 25 fps)
+                    current_transition["end_frame"] = frame
+                    current_transition["end_time"] = time_s
+                else:
+                    if current_transition["end_frame"] - current_transition["start_frame"] > 25: # Lasted more than 1 sec
+                        transitions.append(current_transition)
+                    current_transition = {"start_frame": frame, "end_frame": frame, "period": period, "start_time": time_s, "end_time": time_s}
+                    
+        if current_transition and current_transition["end_frame"] - current_transition["start_frame"] > 25:
+            transitions.append(current_transition)
+            
+        # Return top 10 longest/most intense transitions
+        transitions.sort(key=lambda t: t["end_frame"] - t["start_frame"], reverse=True)
+        return transitions[:10]
+    finally:
+        connection.close()
+
+
+def analyze_set_piece(event_id: str) -> dict[str, Any]:
+    events = list_events()
+    event = next((e for e in events if str(e.get("index")) == event_id or e.get("id") == event_id), None)
+    
+    if not event:
+        raise ValueError(f"Event {event_id} not found.")
+        
+    frame = int(event["frame"])
+    tracking_data = get_tracking_frame(frame)
+    
+    attacking_team = event["team"]
+    defending_team = "Away" if attacking_team == "Home" else "Home"
+    
+    attackers = []
+    defenders = []
+    
+    for player, coords in tracking_data.items():
+        if player.startswith(attacking_team):
+            attackers.append({"name": player, "x": coords["x"], "y": coords["y"]})
+        elif player.startswith(defending_team):
+            defenders.append({"name": player, "x": coords["x"], "y": coords["y"]})
+            
+    # Calculate pairwise distances to find marking pairs
+    import math
+    marking_pairs = []
+    
+    for attacker in attackers:
+        if attacker["x"] is None or attacker["y"] is None:
+            continue
+            
+        closest_defender = None
+        min_dist = float('inf')
+        
+        for defender in defenders:
+            if defender["x"] is None or defender["y"] is None:
+                continue
+                
+            dist = math.hypot(defender["x"] - attacker["x"], defender["y"] - attacker["y"])
+            if dist < min_dist:
+                min_dist = dist
+                closest_defender = defender
+                
+        if closest_defender and min_dist < 5.0: # Only count if within 5 meters (marking range)
+            marking_pairs.append({
+                "attacker": attacker["name"],
+                "defender": closest_defender["name"],
+                "distance": min_dist
+            })
+            
+    return {
+        "event": event,
+        "frame": frame,
+        "marking_pairs": marking_pairs,
+        "coordinates": tracking_data
+    }
+
+
 if __name__ == "__main__":
     start = time.perf_counter()
     first_away_shot = find_event(event_type="SHOT", team="Away", occurrence=1)

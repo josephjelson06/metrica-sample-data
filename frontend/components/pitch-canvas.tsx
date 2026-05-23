@@ -11,6 +11,7 @@ type PitchCanvasProps = {
   sequenceEvents?: SequenceEvent[];
   passNetwork?: PassNetworkData | null;
   passSonars?: any | null;
+  setPieceAnalysis?: any | null;
   framesPerSecond?: number;
   transitionMs?: number;
   showKinematics?: boolean;
@@ -206,7 +207,45 @@ function drawPassNetwork(
   }
 }
 
-
+function drawSetPieceAnalysis(
+  context: CanvasRenderingContext2D,
+  analysis: any,
+  width: number,
+  height: number,
+) {
+  if (!analysis.marking_pairs) return;
+  
+  context.fillStyle = "rgba(215, 91, 31, 0.1)"; // Slight orange tint
+  // Draw marking lines
+  analysis.marking_pairs.forEach((pair: any) => {
+     const attacker = analysis.coordinates[pair.attacker];
+     const defender = analysis.coordinates[pair.defender];
+     if (!attacker || !defender || attacker.x === null || defender.x === null) return;
+     
+     const aX = attacker.x * width;
+     const aY = attacker.y * height;
+     const dX = defender.x * width;
+     const dY = defender.y * height;
+     
+     context.beginPath();
+     context.moveTo(aX, aY);
+     context.lineTo(dX, dY);
+     
+     if (pair.distance < 1.5) {
+         context.strokeStyle = "rgba(215, 91, 31, 0.9)";
+         context.lineWidth = 3;
+     } else {
+         context.strokeStyle = "rgba(255, 165, 0, 0.6)";
+         context.lineWidth = 1.5;
+     }
+     context.stroke();
+     
+     context.beginPath();
+     context.arc(aX, aY, 8, 0, Math.PI * 2);
+     context.fillStyle = "rgba(215, 91, 31, 0.2)";
+     context.fill();
+  });
+}
 
 function drawLineHeights(
   context: CanvasRenderingContext2D,
@@ -676,6 +715,7 @@ export function PitchCanvas({
   sequenceEvents = [],
   passNetwork = null,
   passSonars = null,
+  setPieceAnalysis = null,
   framesPerSecond = 25,
   transitionMs = 180,
   showKinematics = false,
@@ -763,6 +803,10 @@ export function PitchCanvas({
     
     if (passSonars) {
       drawPassSonars(context, passSonars, width, height);
+    }
+
+    if (setPieceAnalysis) {
+      drawSetPieceAnalysis(context, setPieceAnalysis, width, height);
     }
   });
 

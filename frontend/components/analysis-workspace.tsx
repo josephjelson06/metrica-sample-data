@@ -991,6 +991,8 @@ function renderResultSurface(
   passNetwork: any | null,
   physicality: any | null,
   passSonars: any | null,
+  autoInsights: any | null,
+  setPieceAnalysis: any | null,
   showKinematics: boolean,
   showVoronoi: boolean,
   showConvexHull: boolean,
@@ -1019,6 +1021,133 @@ function renderResultSurface(
           <PitchCanvas
             coordinates={null}
             passNetwork={passNetwork}
+          />
+        </div>
+        {renderExplanationPanel(context)}
+        {renderReportPanel(context, onCopyReport, reportCopied)}
+      </div>
+    );
+  }
+
+  if (context.mode === "synthesis") {
+    return (
+      <div style={{ display: "grid", gap: 14 }}>
+        <div style={{ ...cardStyle(), padding: 20 }}>
+          <h3 style={sectionTitleStyle()}>Multi-Primitive Synthesis</h3>
+          <p style={{ margin: "8px 0 16px", color: "var(--muted)", lineHeight: 1.6 }}>
+            {context.query}
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+             {passNetwork && (
+                <div style={{ border: "1px solid rgba(0,0,0,0.1)", borderRadius: 12, padding: 12 }}>
+                  <h4 style={{ margin: "0 0 8px 0", fontSize: 13, color: "var(--ink)" }}>Pass Network</h4>
+                  <PitchCanvas coordinates={null} passNetwork={passNetwork} />
+                </div>
+             )}
+             {passSonars && (
+                <div style={{ border: "1px solid rgba(0,0,0,0.1)", borderRadius: 12, padding: 12 }}>
+                  <h4 style={{ margin: "0 0 8px 0", fontSize: 13, color: "var(--ink)" }}>Pass Sonars</h4>
+                  <PitchCanvas coordinates={null} passSonars={passSonars} />
+                </div>
+             )}
+          </div>
+          {physicality && (
+             <div style={{ marginTop: 16, border: "1px solid rgba(0,0,0,0.1)", borderRadius: 12, padding: 16 }}>
+               <h4 style={{ margin: "0 0 12px 0", fontSize: 14, color: "var(--ink)" }}>Physicality Leaders</h4>
+               <div style={{ display: "flex", gap: 12, overflowX: "auto" }}>
+                 {Object.entries(physicality.players).sort((a: any, b: any) => b[1].total_distance - a[1].total_distance).slice(0, 5).map(([player, stats]: [string, any]) => (
+                   <div key={player} style={{ background: "rgba(0,0,0,0.03)", padding: "8px 12px", borderRadius: 8, minWidth: 120 }}>
+                     <div style={{ fontSize: 12, fontWeight: 500, color: "var(--ink)" }}>{player}</div>
+                     <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+                       { (stats.total_distance / 1000).toFixed(1) } km
+                     </div>
+                   </div>
+                 ))}
+               </div>
+             </div>
+          )}
+        </div>
+        {renderExplanationPanel(context)}
+        {renderReportPanel(context, onCopyReport, reportCopied)}
+      </div>
+    );
+  }
+
+  if (context.mode === "auto_insights") {
+    if (!autoInsights || autoInsights.length === 0) {
+      return (
+        <div style={cardStyle()}>
+          <h3 style={sectionTitleStyle()}>Auto-Insights: Dangerous Transitions</h3>
+          <p style={{ margin: "10px 0 0", color: "var(--muted)" }}>No transitions matched the criteria.</p>
+        </div>
+      );
+    }
+    
+    return (
+      <div style={{ display: "grid", gap: 14 }}>
+        <div style={{ ...cardStyle(), padding: 20 }}>
+          <h3 style={sectionTitleStyle()}>Dangerous Transitions Auto-Insights</h3>
+          <p style={{ margin: "8px 0 16px", color: "var(--muted)", lineHeight: 1.6 }}>
+            {context.query}
+          </p>
+          <div style={{ display: "grid", gap: 12 }}>
+            {autoInsights.map((insight: any, i: number) => (
+              <div 
+                key={i} 
+                style={{ 
+                  padding: 12, 
+                  border: "1px solid rgba(0,0,0,0.1)", 
+                  borderRadius: 8, 
+                  background: "rgba(255,255,255,0.4)",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center"
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13, color: "var(--ink)" }}>Transition #{i+1}</div>
+                  <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
+                    Period {insight.period} • {Math.floor(insight.start_time / 60)}:{String(Math.floor(insight.start_time % 60)).padStart(2, "0")} - {Math.floor(insight.end_time / 60)}:{String(Math.floor(insight.end_time % 60)).padStart(2, "0")}
+                  </div>
+                </div>
+                {onOpenEventFrame && (
+                  <button
+                    onClick={() => onOpenEventFrame(insight.start_frame)}
+                    style={{
+                      background: "rgba(0,0,0,0.05)",
+                      border: "none",
+                      padding: "6px 12px",
+                      borderRadius: 16,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: "var(--ink)",
+                      cursor: "pointer"
+                    }}
+                  >
+                    View
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+        {renderExplanationPanel(context)}
+        {renderReportPanel(context, onCopyReport, reportCopied)}
+      </div>
+    );
+  }
+  
+  if (context.mode === "set_piece") {
+    return (
+      <div style={{ display: "grid", gap: 14 }}>
+        <div style={{ ...cardStyle(), padding: 20 }}>
+          <h3 style={sectionTitleStyle()}>Set Piece Analysis</h3>
+          <p style={{ margin: "8px 0 16px", color: "var(--muted)", lineHeight: 1.6 }}>
+            {context.query}
+          </p>
+          <PitchCanvas
+            coordinates={setPieceAnalysis?.coordinates || null}
+            setPieceAnalysis={setPieceAnalysis}
           />
         </div>
         {renderExplanationPanel(context)}
@@ -1674,6 +1803,8 @@ export function AnalysisWorkspace() {
           latestPayload?.pass_network ?? null,
           latestPayload?.physicality ?? null,
           latestPayload?.pass_sonars ?? null,
+          latestPayload?.auto_insights ?? null,
+          latestPayload?.set_piece_analysis ?? null,
           showKinematics,
           showVoronoi,
           showConvexHull,
