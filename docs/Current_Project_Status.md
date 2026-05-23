@@ -135,6 +135,7 @@ And from those queries it can already return:
 - frame-to-frame structure deltas
 - longer buildup windows for lead-up analysis
 - post-trigger transition windows for recovery-to-attack analysis
+- sequence segmentation around buildup and transition chains
 - plain-English explanations
 - short report-style summaries when requested
 
@@ -159,6 +160,7 @@ It is now capable of:
 - within-match moment comparison
 - deeper lead-up sequence retrieval
 - first post-trigger transition sequence retrieval
+- first explicit sequence segmentation for buildup and transition flows
 - deterministic explanation output
 - first report-generation output
 
@@ -212,6 +214,7 @@ Right now, this project is in a strong middle stage:
 - within-match comparison has started
 - buildup-style sequence retrieval has started
 - transition-style sequence retrieval has started
+- sequence segmentation for those windows has started
 - explanation and reporting output have started
 - richer tactical explanation and stronger comparison logic are now the next major frontier
 

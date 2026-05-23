@@ -808,9 +808,120 @@ def get_transition_tracking_window(
     return window
 
 
-def summarize_team_event_chain(events: list[dict[str, Any]], team: str, anchor_frame: int) -> dict[str, Any]:
+def _normalize_optional_team(team: str | None) -> str | None:
+    if team is None:
+        return None
+
     normalized_team = str(team).strip().title()
     if normalized_team not in {"Home", "Away"}:
+        raise ValueError("team must be either 'Home' or 'Away'.")
+    return normalized_team
+
+
+def _summarize_counts_by_type(events: list[dict[str, Any]]) -> dict[str, int]:
+    counts = Counter(str(event.get("type", "EVENT")).upper() for event in events)
+    return dict(counts)
+
+
+def _compact_event_summary(event: dict[str, Any] | None) -> dict[str, Any] | None:
+    if event is None:
+        return None
+
+    return {
+        "team": event.get("team"),
+        "type": event.get("type"),
+        "subtype": event.get("subtype"),
+        "frame": int(event.get("start_frame", event.get("frame", 0))),
+        "time_s": event.get("start_time_s"),
+        "phase": event.get("phase"),
+    }
+
+
+def segment_sequence_events(
+    events: list[dict[str, Any]],
+    anchor_frame: int,
+    team: str | None = None,
+) -> dict[str, Any]:
+    if not isinstance(anchor_frame, int):
+        raise TypeError("anchor_frame must be an integer.")
+
+    normalized_team = _normalize_optional_team(team)
+    ordered_events = sorted(events, key=lambda event: int(event.get("start_frame", event.get("frame", 0))))
+    before_events = [
+        event for event in ordered_events if int(event.get("start_frame", event.get("frame", 0))) < anchor_frame
+    ]
+    anchor_events = [
+        event for event in ordered_events if int(event.get("start_frame", event.get("frame", 0))) == anchor_frame
+    ]
+    after_events = [
+        event for event in ordered_events if int(event.get("start_frame", event.get("frame", 0))) > anchor_frame
+    ]
+
+    result: dict[str, Any] = {
+        "anchor_frame": anchor_frame,
+        "team": normalized_team,
+        "before_events_count": len(before_events),
+        "anchor_events_count": len(anchor_events),
+        "after_events_count": len(after_events),
+        "before_counts_by_type": _summarize_counts_by_type(before_events),
+        "anchor_counts_by_type": _summarize_counts_by_type(anchor_events),
+        "after_counts_by_type": _summarize_counts_by_type(after_events),
+        "immediate_pre_event": _compact_event_summary(before_events[-1] if before_events else None),
+        "immediate_post_event": _compact_event_summary(after_events[0] if after_events else None),
+    }
+
+    if normalized_team is None:
+        return result
+
+    same_team_before = [event for event in before_events if event.get("team") == normalized_team]
+    same_team_anchor = [event for event in anchor_events if event.get("team") == normalized_team]
+    same_team_after = [event for event in after_events if event.get("team") == normalized_team]
+    opponent_before = [event for event in before_events if event.get("team") not in {None, normalized_team}]
+    opponent_after = [event for event in after_events if event.get("team") not in {None, normalized_team}]
+
+    first_same_team_shot_after = next(
+        (event for event in same_team_after if str(event.get("type", "")).upper() == "SHOT"),
+        None,
+    )
+    first_same_team_shot_before = next(
+        (event for event in reversed(same_team_before) if str(event.get("type", "")).upper() == "SHOT"),
+        None,
+    )
+    first_opponent_after = opponent_after[0] if opponent_after else None
+
+    continuation_events = same_team_after
+    if first_opponent_after is not None:
+        first_opponent_after_frame = int(first_opponent_after.get("start_frame", first_opponent_after.get("frame", 0)))
+        continuation_events = [
+            event
+            for event in same_team_after
+            if int(event.get("start_frame", event.get("frame", 0))) < first_opponent_after_frame
+        ]
+
+    result.update(
+        {
+            "same_team_before_count": len(same_team_before),
+            "same_team_anchor_count": len(same_team_anchor),
+            "same_team_after_count": len(same_team_after),
+            "opponent_before_count": len(opponent_before),
+            "opponent_after_count": len(opponent_after),
+            "same_team_before_counts_by_type": _summarize_counts_by_type(same_team_before),
+            "same_team_after_counts_by_type": _summarize_counts_by_type(same_team_after),
+            "continuation_count_before_opponent": len(continuation_events),
+            "continuation_counts_by_type": _summarize_counts_by_type(continuation_events),
+            "last_same_team_before_event": _compact_event_summary(same_team_before[-1] if same_team_before else None),
+            "first_same_team_after_event": _compact_event_summary(same_team_after[0] if same_team_after else None),
+            "first_opponent_after_event": _compact_event_summary(first_opponent_after),
+            "first_same_team_shot_after": _compact_event_summary(first_same_team_shot_after),
+            "last_same_team_shot_before": _compact_event_summary(first_same_team_shot_before),
+        }
+    )
+    return result
+
+
+def summarize_team_event_chain(events: list[dict[str, Any]], team: str, anchor_frame: int) -> dict[str, Any]:
+    normalized_team = _normalize_optional_team(team)
+    if normalized_team is None:
         raise ValueError("team must be either 'Home' or 'Away'.")
 
     team_events = [

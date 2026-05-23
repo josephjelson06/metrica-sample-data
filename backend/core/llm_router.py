@@ -20,6 +20,7 @@ from backend.tools.db_engine import (
     get_tracking_frame,
     get_transition_tracking_window,
     list_events,
+    segment_sequence_events,
     summarize_team_event_chain,
 )
 
@@ -754,6 +755,13 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
         resolved_frame = int(resolved_event["frame"])
         tracking_result = get_tracking_frame(resolved_frame)
         buildup_sequence = get_buildup_tracking_window(event_frame=resolved_frame)
+        sequence_segments: dict[str, Any] | None = None
+        if resolved_event.get("team") in {"Home", "Away"}:
+            sequence_segments = segment_sequence_events(
+                events=buildup_sequence.get("events", []),
+                anchor_frame=resolved_frame,
+                team=str(resolved_event["team"]),
+            )
         metrics_result: dict[str, Any] | None = None
         if metric_hint is not None:
             metrics_result = get_frame_team_metrics(frame=resolved_frame, team=metric_hint.get("team"))
@@ -768,6 +776,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 "frame": resolved_frame,
                 "event": resolved_event,
                 "metrics": metrics_result,
+                "sequence_segments": sequence_segments,
                 "mode": "buildup",
             },
         }
@@ -792,6 +801,13 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
         resolved_frame = int(resolved_event["frame"])
         tracking_result = get_tracking_frame(resolved_frame)
         transition_sequence = get_transition_tracking_window(event_frame=resolved_frame)
+        sequence_segments: dict[str, Any] | None = None
+        if resolved_event.get("team") in {"Home", "Away"}:
+            sequence_segments = segment_sequence_events(
+                events=transition_sequence.get("events", []),
+                anchor_frame=resolved_frame,
+                team=str(resolved_event["team"]),
+            )
         metrics_result: dict[str, Any] | None = None
         if metric_hint is not None:
             metrics_result = get_frame_team_metrics(frame=resolved_frame, team=metric_hint.get("team"))
@@ -814,6 +830,7 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 "frame": resolved_frame,
                 "event": resolved_event,
                 "metrics": metrics_result,
+                "sequence_segments": sequence_segments,
                 "transition_summary": transition_summary,
                 "mode": "transition",
             },

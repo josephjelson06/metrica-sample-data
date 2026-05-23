@@ -26,6 +26,26 @@ def _format_signed_delta(value: float) -> str:
     return f"{sign}{abs(value):.3f}"
 
 
+def _format_event_summary(event: dict[str, Any] | None) -> str | None:
+    if not event:
+        return None
+
+    team = event.get("team", "Unknown team")
+    event_type = str(event.get("type", "event")).lower()
+    subtype = event.get("subtype")
+    subtype_text = f" ({str(subtype).lower()})" if subtype else ""
+    return f"{team} {event_type}{subtype_text} at {_format_match_time(event.get('time_s'))}"
+
+
+def _format_top_type_counts(counts_by_type: dict[str, int], limit: int = 2) -> str | None:
+    if not counts_by_type:
+        return None
+
+    ordered_counts = sorted(counts_by_type.items(), key=lambda item: (-item[1], item[0]))
+    top_counts = ordered_counts[:limit]
+    return ", ".join(f"{count} {event_type.lower()}" for event_type, count in top_counts)
+
+
 def _describe_filters(filters: dict[str, Any]) -> str:
     parts: list[str] = []
     if filters.get("team"):
@@ -175,6 +195,31 @@ def _build_buildup_event_mix_line(sequence: dict[str, Any] | None) -> str | None
     return f"The buildup event mix is led by {mix_text}."
 
 
+def _build_buildup_segmentation_line(context: dict[str, Any]) -> str | None:
+    sequence_segments = context.get("sequence_segments")
+    event = context.get("event")
+    if not sequence_segments or not event or event.get("team") not in {"Home", "Away"}:
+        return None
+
+    same_team_before_count = int(sequence_segments.get("same_team_before_count", 0))
+    opponent_before_count = int(sequence_segments.get("opponent_before_count", 0))
+    same_team_counts = _format_top_type_counts(sequence_segments.get("same_team_before_counts_by_type", {}))
+    immediate_pre_event = _format_event_summary(sequence_segments.get("immediate_pre_event"))
+    last_same_team_before = _format_event_summary(sequence_segments.get("last_same_team_before_event"))
+
+    line = (
+        f"Before the key event, {event['team']} produced {same_team_before_count} same-team lead-in events"
+        f" while the opponent contributed {opponent_before_count} events in the same window."
+    )
+    if same_team_counts:
+        line += f" The lead-in was mainly {same_team_counts}."
+    if last_same_team_before:
+        line += f" The final same-team action before the key event was {last_same_team_before}."
+    elif immediate_pre_event:
+        line += f" The immediate pre-event in the window was {immediate_pre_event}."
+    return line
+
+
 def _build_transition_chain_line(context: dict[str, Any], sequence: dict[str, Any] | None) -> str | None:
     event = context.get("event")
     if not sequence or not event or event.get("team") not in {"Home", "Away"}:
@@ -205,6 +250,36 @@ def _build_transition_chain_line(context: dict[str, Any], sequence: dict[str, An
         line += f" The first shot arrived {float(first_shot_seconds):.1f} seconds after the trigger."
     elif transition_summary.get("last_event_type"):
         line += f" The sequence ended with {str(transition_summary['last_event_type']).lower()}."
+    return line
+
+
+def _build_transition_segmentation_line(context: dict[str, Any]) -> str | None:
+    sequence_segments = context.get("sequence_segments")
+    event = context.get("event")
+    if not sequence_segments or not event or event.get("team") not in {"Home", "Away"}:
+        return None
+
+    continuation_count = int(sequence_segments.get("continuation_count_before_opponent", 0))
+    opponent_after_count = int(sequence_segments.get("opponent_after_count", 0))
+    continuation_counts = _format_top_type_counts(sequence_segments.get("continuation_counts_by_type", {}))
+    first_same_team_after = _format_event_summary(sequence_segments.get("first_same_team_after_event"))
+    first_opponent_after = _format_event_summary(sequence_segments.get("first_opponent_after_event"))
+    first_shot_after = _format_event_summary(sequence_segments.get("first_same_team_shot_after"))
+
+    line = (
+        f"Before the opponent interrupted again, {event['team']} produced {continuation_count} continuation events"
+        f" after the trigger."
+    )
+    if continuation_counts:
+        line += f" That continuation was mainly {continuation_counts}."
+    if first_same_team_after:
+        line += f" The first same-team follow-up was {first_same_team_after}."
+    if first_shot_after:
+        line += f" The first shot in the chain was {first_shot_after}."
+    elif first_opponent_after:
+        line += f" The first opponent interruption was {first_opponent_after}."
+    elif opponent_after_count == 0:
+        line += " The sequence stayed with the same team for the full window."
     return line
 
 
@@ -275,9 +350,17 @@ def build_explanation(analysis_result: dict[str, Any]) -> str:
     if buildup_mix_line:
         lines.append(buildup_mix_line)
 
+    buildup_segmentation_line = _build_buildup_segmentation_line(context if mode == "buildup" else {})
+    if buildup_segmentation_line:
+        lines.append(buildup_segmentation_line)
+
     transition_chain_line = _build_transition_chain_line(context, sequence if mode == "transition" else None)
     if transition_chain_line:
         lines.append(transition_chain_line)
+
+    transition_segmentation_line = _build_transition_segmentation_line(context if mode == "transition" else {})
+    if transition_segmentation_line:
+        lines.append(transition_segmentation_line)
 
     metric_line = _metric_focus_line(metrics)
     if metric_line:
