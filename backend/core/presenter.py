@@ -155,6 +155,25 @@ def _build_comparison_explanation(context: dict[str, Any]) -> str:
     return " ".join(lines)
 
 
+def _build_buildup_event_mix_line(sequence: dict[str, Any] | None) -> str | None:
+    if not sequence:
+        return None
+
+    events = sequence.get("events", [])
+    if not events:
+        return None
+
+    counts: dict[str, int] = {}
+    for event in events:
+        event_type = str(event.get("type", "event")).lower()
+        counts[event_type] = counts.get(event_type, 0) + 1
+
+    ordered_counts = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    top_counts = ordered_counts[:3]
+    mix_text = ", ".join(f"{count} {event_type}" for event_type, count in top_counts)
+    return f"The buildup event mix is led by {mix_text}."
+
+
 def build_explanation(analysis_result: dict[str, Any]) -> str:
     context = analysis_result["context"]
     mode = context.get("mode")
@@ -198,6 +217,9 @@ def build_explanation(analysis_result: dict[str, Any]) -> str:
             f"{_format_match_time(event.get('start_time_s'))}, frame {event.get('frame')}."
         )
 
+    if mode == "buildup":
+        lines.append("This response focuses on the longer lead-up into the key event, not just the immediate replay clip.")
+
     if context.get("anchor_event") is not None:
         anchor_event = context["anchor_event"]
         lines.append(
@@ -212,6 +234,10 @@ def build_explanation(analysis_result: dict[str, Any]) -> str:
             f"to {_format_match_time(sequence.get('end_frame', 0) / FRAMES_PER_SECOND)} with "
             f"{len(sequence['frames'])} frames and {len(nearby_events)} nearby events."
         )
+
+    buildup_mix_line = _build_buildup_event_mix_line(sequence if mode == "buildup" else None)
+    if buildup_mix_line:
+        lines.append(buildup_mix_line)
 
     metric_line = _metric_focus_line(metrics)
     if metric_line:

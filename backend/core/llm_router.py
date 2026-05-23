@@ -14,6 +14,7 @@ from backend.tools.db_engine import (
     compare_frame_structures,
     count_events,
     find_event,
+    get_buildup_tracking_window,
     get_event_tracking_window,
     get_frame_team_metrics,
     get_tracking_frame,
@@ -340,6 +341,14 @@ def _extract_metric_hint(user_query: str) -> dict[str, Any] | None:
 
 def _extract_report_intent(user_query: str) -> bool:
     return re.search(r"\b(report|summari[sz]e|summary|breakdown|coach note|write up)\b", user_query, flags=re.IGNORECASE) is not None
+
+
+def _extract_buildup_intent(user_query: str) -> bool:
+    return re.search(
+        r"\b(buildup|build up|lead[\s-]?up|sequence leading to|lead(?:ing)? to)\b",
+        user_query,
+        flags=re.IGNORECASE,
+    ) is not None
 
 
 def _event_comparison_label(event_pattern: dict[str, Any]) -> str:
@@ -700,18 +709,58 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
         raise ValueError("user_query must be a non-empty string.")
 
     wants_report = _extract_report_intent(user_query)
-    aggregate_result = _resolve_aggregate_query(user_query)
-    if aggregate_result is not None:
-        aggregate_result["context"]["explanation"] = build_explanation(aggregate_result)
-        if wants_report:
-            aggregate_result["context"]["report"] = build_report(aggregate_result)
-        return aggregate_result
+    buildup_intent = _extract_buildup_intent(user_query)
+    if not buildup_intent:
+        aggregate_result = _resolve_aggregate_query(user_query)
+        if aggregate_result is not None:
+            aggregate_result["context"]["explanation"] = build_explanation(aggregate_result)
+            if wants_report:
+                aggregate_result["context"]["report"] = build_report(aggregate_result)
+            return aggregate_result
 
     frame_hint = _extract_frame_hint(user_query)
     event_hint = _extract_event_hint(user_query)
     metric_hint = _extract_metric_hint(user_query)
     comparison_hint = _extract_comparison_query(user_query)
     sequence_hint = _extract_sequence_event_query(user_query)
+    if buildup_intent and event_hint is not None and event_hint.get("event_type") is not None:
+        resolved_event = find_event(
+            event_type=event_hint["event_type"],
+            team=event_hint.get("team"),
+            subtype_contains=event_hint.get("subtype_contains"),
+            occurrence=event_hint.get("occurrence", 1),
+            order=event_hint.get("order", "first"),
+            relation=event_hint.get("relation", "exact"),
+            anchor_frame=event_hint.get("anchor_frame"),
+            period=event_hint.get("period"),
+            pitch_zone=event_hint.get("pitch_zone"),
+            phase=event_hint.get("phase"),
+        )
+        resolved_frame = int(resolved_event["frame"])
+        tracking_result = get_tracking_frame(resolved_frame)
+        buildup_sequence = get_buildup_tracking_window(event_frame=resolved_frame)
+        metrics_result: dict[str, Any] | None = None
+        if metric_hint is not None:
+            metrics_result = get_frame_team_metrics(frame=resolved_frame, team=metric_hint.get("team"))
+            if metrics_result:
+                metrics_result["requested_metric"] = metric_hint["metric"]
+
+        result = {
+            "coordinates": tracking_result,
+            "sequence": buildup_sequence,
+            "context": {
+                "query": user_query,
+                "frame": resolved_frame,
+                "event": resolved_event,
+                "metrics": metrics_result,
+                "mode": "buildup",
+            },
+        }
+        result["context"]["explanation"] = build_explanation(result)
+        if wants_report:
+            result["context"]["report"] = build_report(result)
+        return result
+
     if comparison_hint is not None:
         left_reference = _resolve_reference(comparison_hint["left"])
         right_reference = _resolve_reference(comparison_hint["right"])

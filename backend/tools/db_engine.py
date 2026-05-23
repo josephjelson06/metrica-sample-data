@@ -775,6 +775,22 @@ def get_event_tracking_window(
     }
 
 
+def get_buildup_tracking_window(
+    event_frame: int,
+    frames_before: int = FRAMES_PER_SECOND * 12,
+    frames_after: int = FRAMES_PER_SECOND * 2,
+    frame_step: int = 1,
+) -> dict[str, Any]:
+    window = get_event_tracking_window(
+        event_frame=event_frame,
+        frames_before=frames_before,
+        frames_after=frames_after,
+        frame_step=frame_step,
+    )
+    window["sequence_type"] = "buildup"
+    return window
+
+
 def get_events_in_window(start_frame: int, end_frame: int, limit: int = 24) -> list[dict[str, Any]]:
     if not isinstance(start_frame, int) or not isinstance(end_frame, int):
         raise TypeError("start_frame and end_frame must be integers.")

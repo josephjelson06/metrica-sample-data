@@ -79,6 +79,7 @@ We built a Groq-based query router that can understand and resolve:
 - richer metric queries like line height proxy, team length proxy, and unit spacing
 - chained event queries like `first shot after the away team's second corner`
 - comparison queries like `compare the first and second corners` or `compare minute 5 and minute 10`
+- buildup queries like `show me the buildup to the goal`
 
 ### 5. Live backend pipeline
 
@@ -115,6 +116,7 @@ The system can already answer questions like:
 - `Show me the first shot after the away team's second corner`
 - `Compare the first and second corners`
 - `Compare minute 5 and minute 10`
+- `Show me the buildup to the goal`
 
 And from those queries it can already return:
 
@@ -129,6 +131,7 @@ And from those queries it can already return:
 - team shape metrics
 - line-height and unit-spacing proxies
 - frame-to-frame structure deltas
+- longer buildup windows for lead-up analysis
 - plain-English explanations
 - short report-style summaries when requested
 
@@ -151,6 +154,7 @@ It is now capable of:
 - frame-to-frame team structure comparison
 - first-level event-to-event reasoning
 - within-match moment comparison
+- deeper lead-up sequence retrieval
 - deterministic explanation output
 - first report-generation output
 
@@ -162,9 +166,9 @@ The strongest directions forward are:
 
 ### 1. Deeper sequence reasoning
 
-- better buildup logic
 - stronger transition chains
 - richer event-to-event context
+- richer event-chain segmentation inside buildup windows
 
 ### 2. Richer tactical metrics
 
@@ -202,6 +206,7 @@ Right now, this project is in a strong middle stage:
 - tactical metric support has started
 - phase and sequence reasoning have started
 - within-match comparison has started
+- buildup-style sequence retrieval has started
 - explanation and reporting output have started
 - richer tactical explanation and stronger comparison logic are now the next major frontier
 
