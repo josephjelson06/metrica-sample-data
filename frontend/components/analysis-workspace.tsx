@@ -4,7 +4,16 @@ import { startTransition, useDeferredValue, useEffect, useEffectEvent } from "re
 
 import { PitchCanvas } from "@/components/pitch-canvas";
 import { useAnalysisStore } from "@/lib/analysis-store";
-import type { SequenceEvent } from "@/lib/types";
+import type {
+  AggregateContext,
+  AnalysisContext,
+  ComparisonContext,
+  CoordinateMap,
+  MetricMap,
+  SequenceEvent,
+  SequenceSegments,
+  TrackingSequence,
+} from "@/lib/types";
 
 function getStatusLabel(status: ReturnType<typeof useAnalysisStore.getState>["status"]) {
   if (status === "connected") {
@@ -27,6 +36,37 @@ function formatClockFromFrame(frame: number, framesPerSecond: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatMatchTime(seconds: number | null | undefined) {
+  if (seconds == null) {
+    return "unknown";
+  }
+
+  const totalSeconds = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainingSeconds = totalSeconds % 60;
+  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
+function formatMetricLabel(metricKey: string) {
+  return metricKey
+    .replace(/_/g, " ")
+    .replace(/\bproxy\b/gi, "proxy")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function formatMetricValue(metricValue: unknown) {
+  if (typeof metricValue === "number") {
+    return metricValue.toFixed(3);
+  }
+  if (typeof metricValue === "string") {
+    return metricValue;
+  }
+  if (metricValue == null) {
+    return "n/a";
+  }
+  return JSON.stringify(metricValue);
 }
 
 function getSequenceEventColor(event: SequenceEvent) {
@@ -53,6 +93,510 @@ function getSequenceEventLabel(event: SequenceEvent) {
   return event.type;
 }
 
+function cardStyle() {
+  return {
+    borderRadius: 18,
+    padding: "16px 18px",
+    background: "rgba(255,255,255,0.72)",
+    border: "1px solid rgba(21,32,23,0.08)",
+  } as const;
+}
+
+function sectionTitleStyle() {
+  return {
+    margin: 0,
+    fontSize: "1rem",
+    letterSpacing: "0.03em",
+  } as const;
+}
+
+function getPrimaryResultTitle(context: AnalysisContext | null) {
+  if (!context) {
+    return "Waiting For Analysis";
+  }
+
+  switch (context.mode) {
+    case "aggregate":
+      return "Aggregate View";
+    case "comparison":
+      return "Comparison View";
+    case "buildup":
+      return "Buildup View";
+    case "transition":
+      return "Transition View";
+    case "sequence_event":
+      return "Sequence Event View";
+    case "frame":
+      return "Frame View";
+    case "event":
+    default:
+      return "Match View";
+  }
+}
+
+function flattenMetricMap(metrics: MetricMap | null | undefined, prefix = ""): Array<{ label: string; value: string }> {
+  if (!metrics) {
+    return [];
+  }
+
+  const entries: Array<{ label: string; value: string }> = [];
+  for (const [metricKey, metricValue] of Object.entries(metrics)) {
+    if (
+      metricKey === "requested_metric" ||
+      metricKey === "team" ||
+      metricKey === "frame"
+    ) {
+      continue;
+    }
+
+    const nextLabel = prefix ? `${prefix} ${formatMetricLabel(metricKey)}` : formatMetricLabel(metricKey);
+    if (
+      metricValue &&
+      typeof metricValue === "object" &&
+      !Array.isArray(metricValue)
+    ) {
+      entries.push(...flattenMetricMap(metricValue as MetricMap, nextLabel));
+      continue;
+    }
+
+    entries.push({
+      label: nextLabel,
+      value: formatMetricValue(metricValue),
+    });
+  }
+  return entries;
+}
+
+function renderMetricGrid(metrics: MetricMap | null | undefined) {
+  const metricEntries = flattenMetricMap(metrics);
+  if (metricEntries.length === 0) {
+    return null;
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+      {metricEntries.slice(0, 12).map((metric) => (
+        <div key={metric.label} style={cardStyle()}>
+          <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            {metric.label}
+          </p>
+          <strong style={{ fontSize: "1.05rem" }}>{metric.value}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function renderSequenceChips(sequenceEvents: SequenceEvent[], framesPerSecond: number) {
+  if (sequenceEvents.length === 0) {
+    return null;
+  }
+
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+      {sequenceEvents.slice(0, 10).map((sequenceEvent, index) => (
+        <span
+          key={`${sequenceEvent.frame}-${sequenceEvent.type}-${index}-chip-display`}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            borderRadius: 999,
+            padding: "5px 10px",
+            background: "rgba(255,255,255,0.78)",
+            border: "1px solid rgba(21,32,23,0.08)",
+            color: "var(--ink)",
+            fontSize: 12,
+          }}
+          title={`${getSequenceEventLabel(sequenceEvent)} at frame ${sequenceEvent.frame}`}
+        >
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: 999,
+              background: getSequenceEventColor(sequenceEvent),
+              flex: "0 0 auto",
+            }}
+          />
+          {formatClockFromFrame(sequenceEvent.frame, framesPerSecond)} {getSequenceEventLabel(sequenceEvent)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function renderAggregatePanel(aggregate: AggregateContext | null | undefined) {
+  if (!aggregate) {
+    return null;
+  }
+
+  const filterTokens = Object.entries(aggregate.filters)
+    .filter(([, value]) => value != null && value !== "")
+    .map(([filterKey, value]) => `${formatMetricLabel(filterKey)}: ${String(value).replace(/_/g, " ")}`);
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <div style={cardStyle()}>
+        <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          Aggregate Result
+        </p>
+        <h3 style={{ margin: "6px 0 8px", fontSize: "1.3rem" }}>
+          {aggregate.query_type === "count" ? `${aggregate.count} matches` : `${aggregate.count} listed events`}
+        </h3>
+        {filterTokens.length > 0 ? (
+          <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.5 }}>{filterTokens.join(" • ")}</p>
+        ) : null}
+      </div>
+
+      {aggregate.query_type === "list" && aggregate.events && aggregate.events.length > 0 ? (
+        <div style={{ ...cardStyle(), padding: 0, overflow: "hidden" }}>
+          <div style={{ padding: "16px 18px", borderBottom: "1px solid rgba(21,32,23,0.08)" }}>
+            <h3 style={sectionTitleStyle()}>Matching Events</h3>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+              <thead>
+                <tr style={{ textAlign: "left", color: "var(--muted)" }}>
+                  <th style={{ padding: "12px 18px" }}>Time</th>
+                  <th style={{ padding: "12px 18px" }}>Team</th>
+                  <th style={{ padding: "12px 18px" }}>Type</th>
+                  <th style={{ padding: "12px 18px" }}>Subtype</th>
+                  <th style={{ padding: "12px 18px" }}>Frame</th>
+                </tr>
+              </thead>
+              <tbody>
+                {aggregate.events.slice(0, 12).map((event, index) => (
+                  <tr key={`${event.frame}-${event.type}-${index}`} style={{ borderTop: "1px solid rgba(21,32,23,0.06)" }}>
+                    <td style={{ padding: "12px 18px" }}>{formatMatchTime(event.start_time_s)}</td>
+                    <td style={{ padding: "12px 18px" }}>{event.team ?? "Unknown"}</td>
+                    <td style={{ padding: "12px 18px" }}>{event.type}</td>
+                    <td style={{ padding: "12px 18px" }}>{event.subtype ?? "-"}</td>
+                    <td style={{ padding: "12px 18px" }}>{event.frame}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function renderSequenceSegmentsPanel(sequenceSegments: SequenceSegments | null | undefined, title: string) {
+  if (!sequenceSegments) {
+    return null;
+  }
+
+  const countRows = [
+    ["Before events", sequenceSegments.before_events_count],
+    ["Anchor events", sequenceSegments.anchor_events_count],
+    ["After events", sequenceSegments.after_events_count],
+    ["Same-team before", sequenceSegments.same_team_before_count],
+    ["Same-team after", sequenceSegments.same_team_after_count],
+    ["Opponent before", sequenceSegments.opponent_before_count],
+    ["Opponent after", sequenceSegments.opponent_after_count],
+    ["Continuation before opponent", sequenceSegments.continuation_count_before_opponent],
+  ].filter(([, value]) => value != null);
+
+  return (
+    <div style={cardStyle()}>
+      <h3 style={sectionTitleStyle()}>{title}</h3>
+      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", marginTop: 12 }}>
+        {countRows.map(([label, value]) => (
+          <div key={label}>
+            <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              {label}
+            </p>
+            <strong>{String(value)}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function renderComparisonPanel(comparison: ComparisonContext | null | undefined) {
+  if (!comparison) {
+    return null;
+  }
+
+  const sequenceDeltas = comparison.sequence_comparison?.deltas
+    ? Object.entries(comparison.sequence_comparison.deltas)
+      .filter(([, value]) => value != null)
+      .map(([deltaKey, deltaValue]) => ({
+        label: formatMetricLabel(deltaKey),
+        value: String(deltaValue),
+      }))
+    : [];
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <div style={cardStyle()}>
+        <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          Comparison
+        </p>
+        <h3 style={{ margin: "6px 0 8px", fontSize: "1.25rem" }}>
+          {comparison.left_label} vs {comparison.right_label}
+        </h3>
+        <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.6 }}>
+          Left frame {comparison.left_frame} at {formatMatchTime(comparison.left_event?.start_time_s)}. Right frame {comparison.right_frame} at {formatMatchTime(comparison.right_event?.start_time_s)}.
+        </p>
+        {comparison.comparison_kind && comparison.comparison_kind !== "moment" ? (
+          <p style={{ margin: "10px 0 0", color: "var(--ink)" }}>
+            Comparison kind: <strong>{comparison.comparison_kind.replace(/_/g, " ")}</strong>
+          </p>
+        ) : null}
+      </div>
+
+      {renderMetricGrid(comparison.metrics_comparison)}
+
+      {sequenceDeltas.length > 0 ? (
+        <div style={cardStyle()}>
+          <h3 style={sectionTitleStyle()}>Sequence Deltas</h3>
+          <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", marginTop: 12 }}>
+            {sequenceDeltas.map((delta) => (
+              <div key={delta.label}>
+                <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                  {delta.label}
+                </p>
+                <strong>{delta.value}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function renderExplanationPanel(context: AnalysisContext | null) {
+  if (!context?.explanation) {
+    return null;
+  }
+
+  return (
+    <div style={cardStyle()}>
+      <h3 style={sectionTitleStyle()}>Explanation</h3>
+      <p style={{ margin: "12px 0 0", lineHeight: 1.7, color: "var(--ink)" }}>{context.explanation}</p>
+    </div>
+  );
+}
+
+function renderReportPanel(context: AnalysisContext | null) {
+  if (!context?.report) {
+    return null;
+  }
+
+  return (
+    <div style={cardStyle()}>
+      <h3 style={sectionTitleStyle()}>Report</h3>
+      <pre
+        style={{
+          margin: "12px 0 0",
+          whiteSpace: "pre-wrap",
+          lineHeight: 1.65,
+          color: "var(--ink)",
+          fontFamily: "var(--font-ui), sans-serif",
+        }}
+      >
+        {context.report}
+      </pre>
+    </div>
+  );
+}
+
+function renderResultMeta(context: AnalysisContext | null) {
+  if (!context) {
+    return null;
+  }
+
+  const badges = [
+    `Mode: ${context.mode}`,
+    `Family: ${context.query_family ?? context.mode}`,
+    `Contract: ${context.response_contract_version ?? "unknown"}`,
+    context.sequence_type ? `Sequence: ${context.sequence_type}` : null,
+    context.comparison_kind ? `Comparison: ${context.comparison_kind}` : null,
+  ].filter(Boolean) as string[];
+
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+      {badges.map((badge) => (
+        <span
+          key={badge}
+          style={{
+            borderRadius: 999,
+            padding: "6px 10px",
+            background: "rgba(255,255,255,0.72)",
+            border: "1px solid rgba(21,32,23,0.08)",
+            color: "var(--muted)",
+            fontSize: 12,
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+          }}
+        >
+          {badge}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function renderPrimarySummary(context: AnalysisContext | null, activeFrame: number, hasSequence: boolean, clipStartLabel: string | null, clipEndLabel: string | null) {
+  if (!context) {
+    return "Waiting for your first query.";
+  }
+
+  const eventContext = context.event;
+  if (context.mode === "aggregate" && context.aggregate) {
+    return (
+      <>
+        <strong>Aggregate query</strong>
+        {` resolved as a ${context.aggregate.query_type} result with ${context.aggregate.count} matches.`}
+      </>
+    );
+  }
+
+  if (context.mode === "comparison" && context.comparison) {
+    return (
+      <>
+        <strong>Comparison result</strong>
+        {` comparing ${context.comparison.left_label} against ${context.comparison.right_label}.`}
+        {context.comparison.comparison_kind && context.comparison.comparison_kind !== "moment"
+          ? ` Comparison kind: ${context.comparison.comparison_kind.replace(/_/g, " ")}.`
+          : ""}
+      </>
+    );
+  }
+
+  if (eventContext) {
+    return (
+      <>
+        <strong>
+          {eventContext.team} {eventContext.type}
+          {eventContext.subtype ? ` / ${eventContext.subtype}` : ""}
+        </strong>
+        {` at event frame ${eventContext.frame}`}
+        {eventContext.start_time_s != null ? ` (${eventContext.start_time_s.toFixed(2)}s)` : ""}
+        {eventContext.from_player ? `, from ${eventContext.from_player}` : ""}
+        {hasSequence ? `, replaying around frame ${activeFrame}.` : "."}
+        {` Relation: ${eventContext.relation}.`}
+        {hasSequence && clipStartLabel && clipEndLabel ? ` Clip window: ${clipStartLabel} to ${clipEndLabel}.` : ""}
+      </>
+    );
+  }
+
+  if (context.frame != null) {
+    return (
+      <>
+        <strong>Direct frame lookup</strong>
+        {` resolved to frame ${context.frame}.`}
+      </>
+    );
+  }
+
+  return "Waiting for your first query.";
+}
+
+function renderResultSurface(
+  context: AnalysisContext | null,
+  displayedCoordinates: CoordinateMap | null,
+  deferredCoordinates: CoordinateMap | null,
+  activeFrame: number,
+  sequenceEvents: SequenceEvent[],
+  replaySequence: TrackingSequence | null,
+  pitchTransitionMs: number,
+) {
+  if (!context) {
+    return (
+      <div style={cardStyle()}>
+        <h3 style={sectionTitleStyle()}>No Result Yet</h3>
+        <p style={{ margin: "10px 0 0", color: "var(--muted)", lineHeight: 1.6 }}>
+          Submit a query to load the first football analysis result.
+        </p>
+      </div>
+    );
+  }
+
+  if (context.mode === "aggregate") {
+    return (
+      <div style={{ display: "grid", gap: 14 }}>
+        {renderAggregatePanel(context.aggregate)}
+        {renderExplanationPanel(context)}
+        {renderReportPanel(context)}
+      </div>
+    );
+  }
+
+  if (context.mode === "comparison") {
+    return (
+      <div style={{ display: "grid", gap: 14 }}>
+        {renderComparisonPanel(context.comparison)}
+        {displayedCoordinates ? (
+          <div style={{ ...cardStyle(), padding: 20 }}>
+            <h3 style={sectionTitleStyle()}>Reference Pitch</h3>
+            <p style={{ margin: "8px 0 16px", color: "var(--muted)", lineHeight: 1.6 }}>
+              This pitch reflects the currently returned reference frame from the comparison result.
+            </p>
+            <PitchCanvas
+              coordinates={deferredCoordinates}
+              activeFrame={activeFrame}
+              sequenceEvents={sequenceEvents}
+              framesPerSecond={replaySequence?.frames_per_second ?? 25}
+              transitionMs={pitchTransitionMs}
+            />
+          </div>
+        ) : null}
+        {renderExplanationPanel(context)}
+        {renderReportPanel(context)}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      {renderMetricGrid(context.metrics)}
+      {renderSequenceSegmentsPanel(
+        context.sequence_segments,
+        context.mode === "buildup" ? "Buildup Segmentation" : context.mode === "transition" ? "Transition Segmentation" : "Sequence Segmentation",
+      )}
+      {sequenceEvents.length > 0 && replaySequence ? (
+        <div style={cardStyle()}>
+          <h3 style={sectionTitleStyle()}>Sequence Events</h3>
+          <div style={{ marginTop: 12 }}>
+            {renderSequenceChips(sequenceEvents, replaySequence.frames_per_second)}
+          </div>
+        </div>
+      ) : null}
+      {displayedCoordinates ? (
+        <div style={{ ...cardStyle(), padding: 20 }}>
+          <h3 style={sectionTitleStyle()}>
+            {context.mode === "buildup"
+              ? "Buildup Replay"
+              : context.mode === "transition"
+                ? "Transition Replay"
+                : context.mode === "sequence_event"
+                  ? "Sequence Event Replay"
+                  : "Pitch View"}
+          </h3>
+          <div style={{ marginTop: 14 }}>
+            <PitchCanvas
+              coordinates={deferredCoordinates}
+              activeFrame={activeFrame}
+              sequenceEvents={sequenceEvents}
+              framesPerSecond={replaySequence?.frames_per_second ?? 25}
+              transitionMs={pitchTransitionMs}
+            />
+          </div>
+        </div>
+      ) : null}
+      {renderExplanationPanel(context)}
+      {renderReportPanel(context)}
+    </div>
+  );
+}
+
 export function AnalysisWorkspace() {
   const status = useAnalysisStore((state) => state.status);
   const query = useAnalysisStore((state) => state.query);
@@ -75,8 +619,7 @@ export function AnalysisWorkspace() {
   const displayedCoordinates = activeSequenceFrame?.coordinates ?? latestPayload?.data ?? null;
   const displayedFrame = activeSequenceFrame?.frame ?? latestPayload?.context.frame ?? 1;
   const deferredCoordinates = useDeferredValue(displayedCoordinates);
-  const eventContext = latestPayload?.context.event;
-  const frame = latestPayload?.context.frame;
+  const context = latestPayload?.context ?? null;
   const activeFrame = displayedFrame;
   const sequence = latestPayload?.sequence ?? null;
   const hasSequence = Boolean(sequence && sequence.frames.length > 0);
@@ -91,6 +634,8 @@ export function AnalysisWorkspace() {
     ? Math.max(20, Math.round(1000 / Math.max(sequence.frames_per_second, 1)))
     : 180;
   const sequenceEvents = replaySequence?.events ?? [];
+  const clipStartLabel = replaySequence ? formatClockFromFrame(replaySequence.start_frame, replaySequence.frames_per_second) : null;
+  const clipEndLabel = replaySequence ? formatClockFromFrame(replaySequence.end_frame, replaySequence.frames_per_second) : null;
 
   useEffect(() => {
     const { connect, disconnect } = useAnalysisStore.getState();
@@ -119,12 +664,12 @@ export function AnalysisWorkspace() {
     }, hasSequence ? Math.max(16, Math.round(1000 / (sequence?.frames_per_second ?? 25))) : playbackIntervalMs);
 
     return () => window.clearInterval(timer);
-  }, [advancePlaybackTick, hasSequence, isPlaying, playbackIntervalMs, sequence]);
+  }, [advancePlaybackTick, hasSequence, isPlaying, playbackIntervalMs, sequence, setPlaying, status]);
 
   return (
     <main
       style={{
-        width: "min(1280px, calc(100vw - 32px))",
+        width: "min(1360px, calc(100vw - 32px))",
         margin: "24px auto",
         display: "grid",
         gridTemplateColumns: "minmax(320px, 400px) minmax(0, 1fr)",
@@ -157,8 +702,7 @@ export function AnalysisWorkspace() {
           Tactical Cinema Console
         </h1>
         <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.6 }}>
-          This migrated frontend keeps the live websocket pipeline, but moves the browser side into
-          a proper Next.js + TypeScript structure with a dedicated state layer and canvas renderer.
+          The frontend is now moving from one pitch-first page into a result-aware football analysis workspace with dedicated surfaces for replay, aggregate, comparison, and report outputs.
         </p>
 
         <div
@@ -210,7 +754,7 @@ export function AnalysisWorkspace() {
             cursor: status === "connecting" ? "wait" : "pointer",
           }}
         >
-          Render Tactical Snapshot
+          Run Analysis Query
         </button>
 
         <div
@@ -324,54 +868,10 @@ export function AnalysisWorkspace() {
                 />
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, color: "var(--muted)", fontSize: 12 }}>
-                <span>
-                  Start {formatClockFromFrame(replaySequence.start_frame, replaySequence.frames_per_second)}
-                </span>
-                <span>
-                  Event {formatClockFromFrame(replaySequence.event_frame, replaySequence.frames_per_second)}
-                </span>
-                <span>
-                  End {formatClockFromFrame(replaySequence.end_frame, replaySequence.frames_per_second)}
-                </span>
+                <span>Start {clipStartLabel}</span>
+                <span>Event {formatClockFromFrame(replaySequence.event_frame, replaySequence.frames_per_second)}</span>
+                <span>End {clipEndLabel}</span>
               </div>
-              {sequenceEvents.length > 0 ? (
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 8,
-                  }}
-                >
-                  {sequenceEvents.slice(0, 8).map((sequenceEvent, index) => (
-                    <span
-                      key={`${sequenceEvent.frame}-${sequenceEvent.type}-${index}-chip`}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 6,
-                        borderRadius: 999,
-                        padding: "5px 10px",
-                        background: "rgba(255,255,255,0.78)",
-                        border: "1px solid rgba(21,32,23,0.08)",
-                        color: "var(--ink)",
-                        fontSize: 12,
-                      }}
-                      title={`${getSequenceEventLabel(sequenceEvent)} at frame ${sequenceEvent.frame}`}
-                    >
-                      <span
-                        style={{
-                          width: 8,
-                          height: 8,
-                          borderRadius: 999,
-                          background: getSequenceEventColor(sequenceEvent),
-                          flex: "0 0 auto",
-                        }}
-                      />
-                      {formatClockFromFrame(sequenceEvent.frame, replaySequence.frames_per_second)} {getSequenceEventLabel(sequenceEvent)}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
             </div>
           ) : null}
 
@@ -445,25 +945,10 @@ export function AnalysisWorkspace() {
         </div>
 
         <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.6 }}>
-          Try prompts like "Show me the last goal before 70:00", "Show me the away team's second corner",
-          or "Show me the first pass after 2:30".
+          Try prompts across the full backend range, like "Show me the away team's second corner",
+          "How many away shots were there in period 2?", "Show me the buildup to the goal",
+          or "Compare the transition after the first and second away recoveries".
         </p>
-
-        <pre
-          style={{
-            margin: 0,
-            maxHeight: 260,
-            overflow: "auto",
-            borderRadius: 18,
-            padding: 16,
-            background: "rgba(20, 32, 19, 0.92)",
-            color: "#edf4e5",
-            fontSize: 12,
-            lineHeight: 1.45,
-          }}
-        >
-          {JSON.stringify(latestPayload, null, 2) || "Waiting for data..."}
-        </pre>
       </section>
 
       <section
@@ -480,12 +965,14 @@ export function AnalysisWorkspace() {
       >
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
           <h2 style={{ margin: 0, fontFamily: "var(--font-display), serif", fontSize: "1.55rem" }}>
-            Match View
+            {getPrimaryResultTitle(context)}
           </h2>
           <p style={{ margin: 0, color: "var(--muted)", fontSize: 14 }}>
-            {displayedCoordinates ? `${Object.keys(displayedCoordinates).length} tracked entities` : "No frame loaded"}
+            {displayedCoordinates ? `${Object.keys(displayedCoordinates).length} tracked entities` : "Data-first result"}
           </p>
         </div>
+
+        {renderResultMeta(context)}
 
         <div
           style={{
@@ -497,38 +984,18 @@ export function AnalysisWorkspace() {
             lineHeight: 1.55,
           }}
         >
-          {eventContext ? (
-            <>
-              <strong>
-                {eventContext.team} {eventContext.type}
-                {eventContext.subtype ? ` / ${eventContext.subtype}` : ""}
-              </strong>
-              {` at event frame ${eventContext.frame}`}
-              {eventContext.start_time_s != null ? ` (${eventContext.start_time_s.toFixed(2)}s)` : ""}
-              {eventContext.from_player ? `, from ${eventContext.from_player}` : ""}
-              {hasSequence ? `, replaying around frame ${activeFrame}.` : "."}
-              {` Relation: ${eventContext.relation}.`}
-              {hasSequence && sequence
-                ? ` Clip window: ${formatClockFromFrame(sequence.start_frame, sequence.frames_per_second)} to ${formatClockFromFrame(sequence.end_frame, sequence.frames_per_second)}.`
-                : ""}
-            </>
-          ) : frame ? (
-            <>
-              <strong>Direct frame lookup</strong>
-              {` resolved to frame ${frame}.`}
-            </>
-          ) : (
-            "Waiting for your first query."
-          )}
+          {renderPrimarySummary(context, activeFrame, hasSequence, clipStartLabel, clipEndLabel)}
         </div>
 
-        <PitchCanvas
-          coordinates={deferredCoordinates}
-          activeFrame={activeFrame}
-          sequenceEvents={sequenceEvents}
-          framesPerSecond={replaySequence?.frames_per_second ?? 25}
-          transitionMs={pitchTransitionMs}
-        />
+        {renderResultSurface(
+          context,
+          displayedCoordinates,
+          deferredCoordinates,
+          activeFrame,
+          sequenceEvents,
+          replaySequence,
+          pitchTransitionMs,
+        )}
       </section>
     </main>
   );
