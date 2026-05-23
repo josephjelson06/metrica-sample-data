@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useDeferredValue, useEffect, useEffectEvent } from "react";
+import { startTransition, useDeferredValue, useEffect, useEffectEvent, useState } from "react";
 
 import { PitchCanvas } from "@/components/pitch-canvas";
 import { useAnalysisStore } from "@/lib/analysis-store";
@@ -452,7 +452,11 @@ function renderComparisonPanel(
   );
 }
 
-function renderEventContextPanel(title: string, eventContext: AnalysisContext["event"] | null | undefined) {
+function renderEventContextPanel(
+  title: string,
+  eventContext: AnalysisContext["event"] | null | undefined,
+  onOpenEventFrame: ((frame: number) => void) | null,
+) {
   if (!eventContext) {
     return null;
   }
@@ -465,6 +469,17 @@ function renderEventContextPanel(title: string, eventContext: AnalysisContext["e
       <h3 style={{ margin: "6px 0 8px", fontSize: "1.1rem" }}>
         {eventContext.team ?? "Unknown"} {getEventDisplayLabel(eventContext)}
       </h3>
+      {onOpenEventFrame ? (
+        <div style={{ marginBottom: 12 }}>
+          <button
+            type="button"
+            onClick={() => onOpenEventFrame(eventContext.frame)}
+            style={actionButtonStyle()}
+          >
+            Open event frame
+          </button>
+        </div>
+      ) : null}
       <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
         <div>
           <p style={{ margin: 0, color: "var(--muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
@@ -580,14 +595,25 @@ function renderExplanationPanel(context: AnalysisContext | null) {
   );
 }
 
-function renderReportPanel(context: AnalysisContext | null) {
+function renderReportPanel(
+  context: AnalysisContext | null,
+  onCopyReport: (() => void) | null,
+  reportCopied: boolean,
+) {
   if (!context?.report) {
     return null;
   }
 
   return (
     <div style={cardStyle()}>
-      <h3 style={sectionTitleStyle()}>Report</h3>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+        <h3 style={sectionTitleStyle()}>Report</h3>
+        {onCopyReport ? (
+          <button type="button" onClick={onCopyReport} style={actionButtonStyle()}>
+            {reportCopied ? "Copied" : "Copy report"}
+          </button>
+        ) : null}
+      </div>
       <div
         style={{
           display: "grid",
@@ -704,6 +730,8 @@ function renderResultSurface(
   replaySequence: TrackingSequence | null,
   pitchTransitionMs: number,
   onOpenEventFrame: ((frame: number) => void) | null,
+  onCopyReport: (() => void) | null,
+  reportCopied: boolean,
 ) {
   if (!context) {
     return (
@@ -721,7 +749,7 @@ function renderResultSurface(
       <div style={{ display: "grid", gap: 14 }}>
         {renderAggregatePanel(context.aggregate, onOpenEventFrame)}
         {renderExplanationPanel(context)}
-        {renderReportPanel(context)}
+        {renderReportPanel(context, onCopyReport, reportCopied)}
       </div>
     );
   }
@@ -746,7 +774,7 @@ function renderResultSurface(
           </div>
         ) : null}
         {renderExplanationPanel(context)}
-        {renderReportPanel(context)}
+        {renderReportPanel(context, onCopyReport, reportCopied)}
       </div>
     );
   }
@@ -754,8 +782,8 @@ function renderResultSurface(
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
-        {renderEventContextPanel("Primary Event", context.event)}
-        {renderEventContextPanel("Anchor Event", context.anchor_event ?? null)}
+        {renderEventContextPanel("Primary Event", context.event, onOpenEventFrame)}
+        {renderEventContextPanel("Anchor Event", context.anchor_event ?? null, onOpenEventFrame)}
       </div>
       {renderMetricGrid(context.metrics)}
       {renderTransitionSummaryPanel(context.transition_summary)}
@@ -794,12 +822,13 @@ function renderResultSurface(
         </div>
       ) : null}
       {renderExplanationPanel(context)}
-      {renderReportPanel(context)}
+      {renderReportPanel(context, onCopyReport, reportCopied)}
     </div>
   );
 }
 
 export function AnalysisWorkspace() {
+  const [reportCopied, setReportCopied] = useState(false);
   const status = useAnalysisStore((state) => state.status);
   const query = useAnalysisStore((state) => state.query);
   const latestPayload = useAnalysisStore((state) => state.latestPayload);
@@ -870,6 +899,19 @@ export function AnalysisWorkspace() {
 
   const openResultFrame = useEffectEvent((frame: number) => {
     startTransition(() => requestFrame(frame));
+  });
+
+  const copyReport = useEffectEvent(() => {
+    const report = latestPayload?.context.report;
+    if (!report || typeof navigator === "undefined" || !navigator.clipboard) {
+      return;
+    }
+
+    void navigator.clipboard.writeText(report);
+    setReportCopied(true);
+    window.setTimeout(() => {
+      setReportCopied(false);
+    }, 1600);
   });
 
   return (
@@ -1202,6 +1244,8 @@ export function AnalysisWorkspace() {
           replaySequence,
           pitchTransitionMs,
           openResultFrame,
+          copyReport,
+          reportCopied,
         )}
       </section>
     </main>
