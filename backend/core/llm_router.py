@@ -11,6 +11,7 @@ from groq import Groq
 
 from backend.core.presenter import build_explanation, build_report
 from backend.tools.db_engine import (
+    compare_frame_structures,
     count_events,
     find_event,
     get_event_tracking_window,
@@ -341,6 +342,126 @@ def _extract_report_intent(user_query: str) -> bool:
     return re.search(r"\b(report|summari[sz]e|summary|breakdown|coach note|write up)\b", user_query, flags=re.IGNORECASE) is not None
 
 
+def _event_comparison_label(event_pattern: dict[str, Any]) -> str:
+    subtype = str(event_pattern.get("subtype_contains") or "").lower()
+    event_type = str(event_pattern.get("event_type") or "").lower()
+    if "corner" in subtype:
+        return "corner"
+    if "free kick" in subtype:
+        return "free kick"
+    if "throw in" in subtype:
+        return "throw in"
+    if "kick off" in subtype:
+        return "kick off"
+    if "penalty" in subtype:
+        return "penalty"
+    if "goal" in subtype:
+        return "goal"
+    if "saved" in subtype:
+        return "saved shot"
+    if event_type == "shot":
+        return "shot"
+    if event_type == "pass":
+        return "pass"
+    if event_type == "recovery":
+        return "recovery"
+    if event_type == "card":
+        return "card"
+    return event_type
+
+
+def _parse_order_token(token: str) -> tuple[str, int]:
+    normalized_token = str(token).strip().lower()
+    if normalized_token in {"last", "latest", "final"}:
+        return "last", 1
+    return "first", ORDINAL_WORDS[normalized_token]
+
+
+def _extract_same_event_comparison(user_query: str) -> dict[str, Any] | None:
+    lower_query = user_query.lower()
+    ordinal_matches = re.findall(r"\b(first|second|third|fourth|fifth|last|latest|final)\b", lower_query)
+    if len(ordinal_matches) < 2:
+        return None
+
+    matched_pattern: dict[str, Any] | None = None
+    for event_pattern in EVENT_PATTERNS:
+        if re.search(event_pattern["pattern"], lower_query, flags=re.IGNORECASE):
+            matched_pattern = event_pattern
+            break
+
+    if matched_pattern is None:
+        return None
+
+    team = _extract_team_hint(user_query)
+    period = _extract_period_hint(user_query)
+    pitch_zone = _extract_pitch_zone_hint(user_query)
+    phase = _extract_phase_hint(user_query)
+    event_label = _event_comparison_label(matched_pattern)
+
+    left_order, left_occurrence = _parse_order_token(ordinal_matches[0])
+    right_order, right_occurrence = _parse_order_token(ordinal_matches[1])
+
+    def _build_event_hint(order: str, occurrence: int) -> dict[str, Any]:
+        hint: dict[str, Any] = {
+            "event_type": matched_pattern["event_type"],
+            "team": team,
+            "occurrence": occurrence,
+            "order": order,
+            "relation": "exact",
+            "anchor_frame": None,
+            "period": period,
+            "pitch_zone": pitch_zone,
+            "phase": phase,
+        }
+        if matched_pattern["subtype_contains"]:
+            hint["subtype_contains"] = matched_pattern["subtype_contains"]
+        return hint
+
+    return {
+        "left": {"kind": "event", "hint": _build_event_hint(left_order, left_occurrence), "label": f"{ordinal_matches[0]} {event_label}"},
+        "right": {"kind": "event", "hint": _build_event_hint(right_order, right_occurrence), "label": f"{ordinal_matches[1]} {event_label}"},
+        "team": team,
+    }
+
+
+def _extract_reference_hint(segment: str) -> dict[str, Any] | None:
+    frame_hint = _extract_frame_hint(segment)
+    if frame_hint is not None:
+        return {"kind": "frame", "frame": frame_hint, "label": segment.strip()}
+
+    event_hint = _extract_event_hint(segment)
+    if event_hint is not None and event_hint.get("event_type") is not None:
+        return {"kind": "event", "hint": event_hint, "label": segment.strip()}
+
+    return None
+
+
+def _extract_comparison_query(user_query: str) -> dict[str, Any] | None:
+    comparison_match = re.search(r"\bcompar(?:e|ing)\b", user_query, flags=re.IGNORECASE)
+    if comparison_match is None:
+        return None
+
+    stripped_query = user_query[comparison_match.end() :].strip(" ,.")
+    same_event_comparison = _extract_same_event_comparison(stripped_query)
+    if same_event_comparison is not None:
+        return same_event_comparison
+
+    parts = re.split(r"\band\b", stripped_query, maxsplit=1, flags=re.IGNORECASE)
+    if len(parts) != 2:
+        return None
+
+    left_reference = _extract_reference_hint(parts[0].strip(" ,."))
+    right_reference = _extract_reference_hint(parts[1].strip(" ,."))
+    if left_reference is None or right_reference is None:
+        return None
+
+    return {
+        "left": left_reference,
+        "right": right_reference,
+        "team": _extract_team_hint(user_query),
+    }
+
+
 def _extract_sequence_event_query(user_query: str) -> dict[str, Any] | None:
     sequence_match = re.search(r"\b(after|before)\b", user_query, flags=re.IGNORECASE)
     if sequence_match is None:
@@ -364,6 +485,38 @@ def _extract_sequence_event_query(user_query: str) -> dict[str, Any] | None:
         "relation": relation,
         "target": target_hint,
         "anchor": anchor_hint,
+    }
+
+
+def _resolve_reference(reference: dict[str, Any]) -> dict[str, Any]:
+    if reference["kind"] == "frame":
+        frame = int(reference["frame"])
+        return {
+            "frame": frame,
+            "event": None,
+            "coordinates": get_tracking_frame(frame),
+            "label": reference.get("label", f"frame {frame}"),
+        }
+
+    event_hint = reference["hint"]
+    event = find_event(
+        event_type=event_hint["event_type"],
+        team=event_hint.get("team"),
+        subtype_contains=event_hint.get("subtype_contains"),
+        occurrence=event_hint.get("occurrence", 1),
+        order=event_hint.get("order", "first"),
+        relation=event_hint.get("relation", "exact"),
+        anchor_frame=event_hint.get("anchor_frame"),
+        period=event_hint.get("period"),
+        pitch_zone=event_hint.get("pitch_zone"),
+        phase=event_hint.get("phase"),
+    )
+    frame = int(event["frame"])
+    return {
+        "frame": frame,
+        "event": event,
+        "coordinates": get_tracking_frame(frame),
+        "label": reference.get("label", f"frame {frame}"),
     }
 
 
@@ -557,7 +710,53 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
     frame_hint = _extract_frame_hint(user_query)
     event_hint = _extract_event_hint(user_query)
     metric_hint = _extract_metric_hint(user_query)
+    comparison_hint = _extract_comparison_query(user_query)
     sequence_hint = _extract_sequence_event_query(user_query)
+    if comparison_hint is not None:
+        left_reference = _resolve_reference(comparison_hint["left"])
+        right_reference = _resolve_reference(comparison_hint["right"])
+        comparison_team = comparison_hint.get("team")
+        if comparison_team is None:
+            left_event = left_reference.get("event")
+            right_event = right_reference.get("event")
+            if (
+                left_event is not None
+                and right_event is not None
+                and left_event.get("team") == right_event.get("team")
+                and left_event.get("team") in {"Home", "Away"}
+            ):
+                comparison_team = str(left_event["team"])
+
+        metrics_comparison = compare_frame_structures(
+            start_frame=int(left_reference["frame"]),
+            end_frame=int(right_reference["frame"]),
+            team=comparison_team,
+        )
+        result = {
+            "coordinates": right_reference["coordinates"],
+            "sequence": None,
+            "context": {
+                "query": user_query,
+                "frame": right_reference["frame"],
+                "event": right_reference.get("event"),
+                "mode": "comparison",
+                "comparison": {
+                    "team": comparison_team,
+                    "left_label": left_reference["label"],
+                    "right_label": right_reference["label"],
+                    "left_frame": left_reference["frame"],
+                    "right_frame": right_reference["frame"],
+                    "left_event": left_reference.get("event"),
+                    "right_event": right_reference.get("event"),
+                    "metrics_comparison": metrics_comparison,
+                },
+            },
+        }
+        result["context"]["explanation"] = build_explanation(result)
+        if wants_report:
+            result["context"]["report"] = build_report(result)
+        return result
+
     if frame_hint is not None and (event_hint is None or event_hint.get("event_type") is None):
         tracking_result = get_tracking_frame(frame_hint)
         metrics_result: dict[str, Any] | None = None

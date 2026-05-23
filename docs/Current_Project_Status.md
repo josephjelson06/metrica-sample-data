@@ -78,6 +78,7 @@ We built a Groq-based query router that can understand and resolve:
 - metric queries like width, depth, compactness, hull area, and team shape
 - richer metric queries like line height proxy, team length proxy, and unit spacing
 - chained event queries like `first shot after the away team's second corner`
+- comparison queries like `compare the first and second corners` or `compare minute 5 and minute 10`
 
 ### 5. Live backend pipeline
 
@@ -112,6 +113,8 @@ The system can already answer questions like:
 - `Show me the first pass in attacking transition`
 - `What was the home team's width at minute 5?`
 - `Show me the first shot after the away team's second corner`
+- `Compare the first and second corners`
+- `Compare minute 5 and minute 10`
 
 And from those queries it can already return:
 
@@ -147,6 +150,7 @@ It is now capable of:
 - frame-based tactical metrics
 - frame-to-frame team structure comparison
 - first-level event-to-event reasoning
+- within-match moment comparison
 - deterministic explanation output
 - first report-generation output
 
@@ -183,9 +187,9 @@ The strongest directions forward are:
 
 ### 5. Within-match comparison
 
-- compare two corners
-- compare first-half and second-half patterns
-- compare team shape across moments
+- compare first-half and second-half patterns more deeply
+- compare event groups, not just single moments
+- compare team shape across richer sequence windows
 
 ## Current status summary
 
@@ -197,6 +201,7 @@ Right now, this project is in a strong middle stage:
 - the replay pipeline is working
 - tactical metric support has started
 - phase and sequence reasoning have started
+- within-match comparison has started
 - explanation and reporting output have started
 - richer tactical explanation and stronger comparison logic are now the next major frontier
 

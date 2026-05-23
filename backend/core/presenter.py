@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.tools.db_engine import FRAMES_PER_SECOND, compare_team_metrics_between_frames, get_frame_team_metrics
+from backend.tools.db_engine import (
+    FRAMES_PER_SECOND,
+    compare_frame_structures,
+    compare_team_metrics_between_frames,
+    get_frame_team_metrics,
+)
 
 
 def _format_match_time(seconds: float | int | None) -> str:
@@ -101,9 +106,61 @@ def _sequence_change_line(sequence: dict[str, Any] | None, team: str | None) -> 
     )
 
 
+def _comparison_delta_line(comparison_metrics: dict[str, Any]) -> str | None:
+    deltas = comparison_metrics.get("deltas")
+    team = comparison_metrics.get("team")
+    if not deltas or not team:
+        return None
+
+    return (
+        f"For {team}, width changed by {_format_signed_delta(float(deltas['width']))}, "
+        f"depth by {_format_signed_delta(float(deltas['depth']))}, "
+        f"line-height proxy by {_format_signed_delta(float(deltas['line_height_proxy']))}, "
+        f"deep-to-mid spacing by {_format_signed_delta(float(deltas['deep_to_mid_spacing']))}, "
+        f"and mid-to-high spacing by {_format_signed_delta(float(deltas['mid_to_high_spacing']))}."
+    )
+
+
+def _build_comparison_explanation(context: dict[str, Any]) -> str:
+    comparison = context.get("comparison", {})
+    left_label = comparison.get("left_label", "the first moment")
+    right_label = comparison.get("right_label", "the second moment")
+    left_frame = comparison.get("left_frame")
+    right_frame = comparison.get("right_frame")
+    lines = [
+        f"Compared {left_label} (frame {left_frame}) with {right_label} (frame {right_frame})."
+    ]
+
+    left_event = comparison.get("left_event")
+    right_event = comparison.get("right_event")
+    if left_event is not None and right_event is not None:
+        lines.append(
+            f"The first moment was at {_format_match_time(left_event.get('start_time_s'))} and "
+            f"the second moment was at {_format_match_time(right_event.get('start_time_s'))}."
+        )
+
+    metrics_comparison = comparison.get("metrics_comparison", {})
+    if "deltas" in metrics_comparison:
+        delta_line = _comparison_delta_line(metrics_comparison)
+        if delta_line:
+            lines.append(delta_line)
+    else:
+        home_delta_line = _comparison_delta_line(metrics_comparison.get("Home", {}))
+        away_delta_line = _comparison_delta_line(metrics_comparison.get("Away", {}))
+        if home_delta_line:
+            lines.append(home_delta_line)
+        if away_delta_line:
+            lines.append(away_delta_line)
+
+    return " ".join(lines)
+
+
 def build_explanation(analysis_result: dict[str, Any]) -> str:
     context = analysis_result["context"]
     mode = context.get("mode")
+
+    if mode == "comparison":
+        return _build_comparison_explanation(context)
 
     if mode == "aggregate":
         aggregate = context.get("aggregate", {})
@@ -177,6 +234,18 @@ def build_report(analysis_result: dict[str, Any]) -> str:
     context = analysis_result["context"]
     mode = context.get("mode")
     explanation = build_explanation(analysis_result)
+
+    if mode == "comparison":
+        comparison = context.get("comparison", {})
+        return "\n".join(
+            [
+                "Football Comparison Report",
+                f"Query: {context.get('query')}",
+                f"Left moment: {comparison.get('left_label')} (frame {comparison.get('left_frame')})",
+                f"Right moment: {comparison.get('right_label')} (frame {comparison.get('right_frame')})",
+                f"Summary: {explanation}",
+            ]
+        )
 
     if mode == "aggregate":
         aggregate = context.get("aggregate", {})

@@ -342,6 +342,18 @@ def compare_team_metrics_between_frames(start_frame: int, end_frame: int, team: 
     }
 
 
+def compare_frame_structures(start_frame: int, end_frame: int, team: str | None = None) -> dict[str, Any]:
+    if team is not None:
+        return compare_team_metrics_between_frames(start_frame=start_frame, end_frame=end_frame, team=team)
+
+    return {
+        "start_frame": start_frame,
+        "end_frame": end_frame,
+        "Home": compare_team_metrics_between_frames(start_frame=start_frame, end_frame=end_frame, team="Home"),
+        "Away": compare_team_metrics_between_frames(start_frame=start_frame, end_frame=end_frame, team="Away"),
+    }
+
+
 def _normalize_pitch_zone(pitch_zone: str | None) -> str | None:
     if pitch_zone is None:
         return None
