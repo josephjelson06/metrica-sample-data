@@ -8,25 +8,14 @@ The original sample data is still here, but the workspace is now organized so it
   - original Metrica sample files
   - `data/parquet/` for generated Parquet outputs
 - `docs/`
-  - `docs/guides/` for dataset explanations
-  - `docs/reports/` for day-by-day progress notes
+  - two main project guides live directly in `docs/`
+  - older supporting material is preserved in `docs/archive/`
+- `backend/`
+  - FastAPI app, Groq router, and DuckDB query engine
 - `scripts/`
-  - CSV to Parquet conversion scripts
-  - websocket test client
-- `tools/`
-  - DuckDB query helpers
-- `core/`
-  - LLM routing logic
-- `api/`
-  - FastAPI websocket server
+  - only the active CSV to Parquet conversion scripts
 - `frontend/`
   - Next.js + TypeScript frontend
-- `static/`
-  - older lightweight fallback frontend UI
-- `logs/`
-  - saved server and debugging logs
-- `main.py`
-  - FastAPI app entrypoint
 - `.env`
   - local secrets such as the Groq API key
 - `requirements.txt`
@@ -34,20 +23,24 @@ The original sample data is still here, but the workspace is now organized so it
 
 ## Quick project map
 
-Useful explanation files:
+Main project documents:
 
-- [Sample Game 2 Data Guide](C:/Users/josep/OneDrive/Desktop/sample-data/docs/guides/Sample_Game_2_Data_Guide.md)
-- [Football Intelligence System Design Map](C:/Users/josep/OneDrive/Desktop/sample-data/docs/guides/Football_Intelligence_System_Design_Map.md)
-- [Day 1 Progress Report](C:/Users/josep/OneDrive/Desktop/sample-data/docs/reports/Day_1_Progress_Report.md)
+- [Current Project Status](C:/Users/josep/OneDrive/Desktop/sample-data/docs/Current_Project_Status.md)
+- [Maximum Intelligence Extractable From Current Data](C:/Users/josep/OneDrive/Desktop/sample-data/docs/Maximum_Intelligence_Extractable_From_Current_Data.md)
+
+Supporting archived documents:
+
+- [Archive Folder](C:/Users/josep/OneDrive/Desktop/sample-data/docs/archive/)
 
 Useful working files:
 
 - [Merged tracking converter](C:/Users/josep/OneDrive/Desktop/sample-data/scripts/convert_data.py)
-- [DuckDB engine](C:/Users/josep/OneDrive/Desktop/sample-data/tools/db_engine.py)
-- [LLM router](C:/Users/josep/OneDrive/Desktop/sample-data/core/llm_router.py)
-- [WebSocket server](C:/Users/josep/OneDrive/Desktop/sample-data/api/websocket_server.py)
+- [Event converter](C:/Users/josep/OneDrive/Desktop/sample-data/scripts/convert_eventdata.py)
+- [DuckDB engine](C:/Users/josep/OneDrive/Desktop/sample-data/backend/tools/db_engine.py)
+- [LLM router](C:/Users/josep/OneDrive/Desktop/sample-data/backend/core/llm_router.py)
+- [WebSocket server](C:/Users/josep/OneDrive/Desktop/sample-data/backend/api/websocket_server.py)
+- [Backend entrypoint](C:/Users/josep/OneDrive/Desktop/sample-data/backend/main.py)
 - [Next frontend](C:/Users/josep/OneDrive/Desktop/sample-data/frontend/README.md)
-- [Fallback frontend](C:/Users/josep/OneDrive/Desktop/sample-data/static/index.html)
 
 ## About the repo
 In this repository you can find sample tracking and event data that exemplify the Elite data package we offer. The idea of this data is twofold: 

@@ -2,8 +2,6 @@
 
 This folder contains the new Next.js + TypeScript frontend for the project.
 
-It replaces the role of the older browser demo in `static/index.html`, while keeping the same backend websocket pipeline.
-
 ## What this frontend does
 
 - connects to the FastAPI websocket backend
@@ -50,7 +48,7 @@ npm install
 In one terminal, start the Python backend from the project root:
 
 ```powershell
-.\.venv\Scripts\python.exe main.py
+.\.venv\Scripts\python.exe -m backend.main
 ```
 
 In another terminal, start the Next frontend:
@@ -75,8 +73,8 @@ npm run build
 
 ## Notes
 
-- The old `static/index.html` is still kept in the repo as a lightweight fallback demo.
-- The new frontend is the better long-term path because it gives us:
+- The Next.js frontend is now the primary browser client for this repo.
+- It gives us:
   - TypeScript safety
   - component structure
   - state management with Zustand

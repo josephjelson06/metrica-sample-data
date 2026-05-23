@@ -7,8 +7,8 @@ import pandas as pd
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_HOME_CSV = PROJECT_ROOT / "data" / "Sample_Game_2" / "Sample_Game_2_RawTrackingData_Home_Team.csv"
-DEFAULT_AWAY_CSV = PROJECT_ROOT / "data" / "Sample_Game_2" / "Sample_Game_2_RawTrackingData_Away_Team.csv"
+DEFAULT_HOME_CSV = PROJECT_ROOT / "data" / "sample_game_2" / "Sample_Game_2_RawTrackingData_Home_Team.csv"
+DEFAULT_AWAY_CSV = PROJECT_ROOT / "data" / "sample_game_2" / "Sample_Game_2_RawTrackingData_Away_Team.csv"
 DEFAULT_OUTPUT = PROJECT_ROOT / "data" / "parquet" / "metrica_tracking.parquet"
 
 
