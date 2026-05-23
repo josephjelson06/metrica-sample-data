@@ -281,6 +281,52 @@ def get_team_shape_metrics_for_coordinates(coordinates: CoordinateMap, team: str
     }
 
 
+def calculate_spatial_danger_grid(frame: int) -> dict[str, Any]:
+    coordinates = get_tracking_frame(frame)
+    if not coordinates:
+        return {}
+
+    home_points = []
+    away_points = []
+    for k, pt in coordinates.items():
+        if pt.get("x") is not None and pt.get("y") is not None:
+            if k.startswith("Home_"):
+                home_points.append((float(pt["x"]), float(pt["y"])))
+            elif k.startswith("Away_"):
+                away_points.append((float(pt["x"]), float(pt["y"])))
+
+    grid = []
+    rows, cols = 15, 20
+    for r in range(rows):
+        y_center = (r + 0.5) / rows
+        for c in range(cols):
+            x_center = (c + 0.5) / cols
+            
+            home_dist = min([hypot(x_center - hx, y_center - hy) for hx, hy in home_points]) if home_points else 999.0
+            away_dist = min([hypot(x_center - ax, y_center - ay) for ax, ay in away_points]) if away_points else 999.0
+            
+            control = "Home" if home_dist < away_dist else "Away"
+            
+            home_threat = max(0, 1 - hypot(x_center - 1.0, y_center - 0.5) * 1.5)
+            away_threat = max(0, 1 - hypot(x_center - 0.0, y_center - 0.5) * 1.5)
+            
+            score = float(home_threat if control == "Home" else away_threat)
+            
+            grid.append({
+                "x": c,
+                "y": r,
+                "control": control,
+                "score": score
+            })
+            
+    return {
+        "frame": frame,
+        "grid": grid,
+        "rows": rows,
+        "cols": cols
+    }
+
+
 def get_frame_team_metrics(frame: int, team: str | None = None) -> dict[str, Any]:
     coordinates = get_tracking_frame(frame)
     if not coordinates:
@@ -695,6 +741,42 @@ def get_tracking_frame(frame: int) -> dict[str, dict[str, float | int | None]]:
     return get_player_coordinates_for_frame(target_frame=frame)
 
 
+def _enrich_with_kinematics(window_frames: list[dict[str, Any]]) -> None:
+    pitch_length = 105.0
+    pitch_width = 68.0
+
+    for i in range(1, len(window_frames)):
+        prev_frame_data = window_frames[i - 1]
+        curr_frame_data = window_frames[i]
+        
+        time_delta = (curr_frame_data["frame"] - prev_frame_data["frame"]) / FRAMES_PER_SECOND
+        if time_delta <= 0:
+            continue
+            
+        prev_coords = prev_frame_data["coordinates"]
+        for player_name, point in curr_frame_data["coordinates"].items():
+            prev_point = prev_coords.get(player_name)
+            if not prev_point:
+                continue
+                
+            curr_x, curr_y = point.get("x"), point.get("y")
+            prev_x, prev_y = prev_point.get("x"), prev_point.get("y")
+            
+            if curr_x is None or curr_y is None or prev_x is None or prev_y is None:
+                continue
+                
+            vx_normalized = (float(curr_x) - float(prev_x)) / time_delta
+            vy_normalized = (float(curr_y) - float(prev_y)) / time_delta
+            
+            vx_meters = vx_normalized * pitch_length
+            vy_meters = vy_normalized * pitch_width
+            speed = hypot(vx_meters, vy_meters)
+            
+            point["vx"] = vx_meters
+            point["vy"] = vy_meters
+            point["speed"] = speed
+
+
 def get_tracking_window(
     start_frame: int,
     end_frame: int,
@@ -743,6 +825,7 @@ def get_tracking_window(
                 }
             )
 
+        _enrich_with_kinematics(window_frames)
         return window_frames
     finally:
         connection.close()
@@ -1045,25 +1128,185 @@ def get_player_coordinates_for_frame(target_frame: int) -> CoordinateMap:
     if not isinstance(target_frame, int):
         raise TypeError("target_frame must be an integer.")
 
-    _require_file(TRACKING_PARQUET_PATH, "Tracking parquet file")
+    window = get_tracking_window(start_frame=target_frame - 1, end_frame=target_frame, frame_step=1)
+    for frame_data in window:
+        if frame_data["frame"] == target_frame:
+            return frame_data["coordinates"]
+    return {}
 
+
+def get_physicality_summary(period: int, team: str) -> dict[str, Any]:
+    normalized_team = team.strip().title()
     connection = _connect()
     try:
-        coordinate_columns = _get_tracking_coordinate_columns(connection)
-        select_clause = ", ".join(f'"{column_name}"' for column_name in coordinate_columns)
-        query = f"""
-            SELECT {select_clause}
-            FROM read_parquet(?)
-            WHERE "Frame" = ?
-        """
-        row = connection.execute(query, [str(TRACKING_PARQUET_PATH), target_frame]).fetchone()
-
-        if row is None:
-            return {}
-
-        return _build_coordinate_map(coordinate_columns, row)
+        cols = _get_tracking_coordinate_columns(connection)
+        team_cols = [c for c in cols if c.startswith(normalized_team)]
+        players = set([c.rsplit("_", 1)[0] for c in team_cols])
+        
+        stats = {}
+        for player in players:
+            x_col = f'"{player}_x"'
+            y_col = f'"{player}_y"'
+            
+            query = f"""
+            WITH frame_data AS (
+                SELECT 
+                    "Frame", 
+                    "Time [s]" as t,
+                    {x_col} as x, 
+                    {y_col} as y
+                FROM read_parquet(?)
+                WHERE "Period" = ? AND {x_col} IS NOT NULL
+                ORDER BY "Frame" ASC
+            ),
+            kinematics AS (
+                SELECT
+                    "Frame",
+                    x, y,
+                    t,
+                    (x - LAG(x) OVER (ORDER BY "Frame")) * 105.0 as dx,
+                    (y - LAG(y) OVER (ORDER BY "Frame")) * 68.0 as dy,
+                    (t - LAG(t) OVER (ORDER BY "Frame")) as dt
+                FROM frame_data
+            ),
+            speeds AS (
+                SELECT
+                    SQRT(dx*dx + dy*dy) as dist,
+                    SQRT(dx*dx + dy*dy) / dt as speed
+                FROM kinematics
+                WHERE dt > 0 AND dist IS NOT NULL
+            )
+            SELECT
+                SUM(dist) as total_distance,
+                SUM(CASE WHEN speed > 5.5 THEN dist ELSE 0 END) as hsr_distance,
+                SUM(CASE WHEN speed > 7.0 THEN dist ELSE 0 END) as sprint_distance
+            FROM speeds
+            """
+            row = connection.execute(query, [str(TRACKING_PARQUET_PATH), period]).fetchone()
+            if row and row[0] is not None:
+                stats[player] = {
+                    "total_distance": float(row[0]),
+                    "hsr_distance": float(row[1]),
+                    "sprint_distance": float(row[2])
+                }
+                
+        return {
+            "period": period,
+            "team": normalized_team,
+            "players": stats
+        }
     finally:
         connection.close()
+
+
+def get_pass_network(team: str, period: int | None = None) -> dict[str, Any]:
+    normalized_team = _normalize_optional_team(team)
+    if not normalized_team:
+        raise ValueError("Team is required for pass network.")
+
+    events = list_events(event_type="PASS", team=normalized_team, period=period, limit=1000)
+    
+    nodes: dict[str, dict[str, Any]] = {}
+    edges_map: dict[tuple[str, str], int] = {}
+    
+    for event in events:
+        from_p = event.get("from_player")
+        to_p = event.get("to_player")
+        x = event.get("start_x")
+        y = event.get("start_y")
+        
+        if not from_p or not x or not y:
+            continue
+            
+        if from_p not in nodes:
+            nodes[from_p] = {"x_sum": 0.0, "y_sum": 0.0, "passes_made": 0, "passes_received": 0}
+            
+        nodes[from_p]["x_sum"] += float(x)
+        nodes[from_p]["y_sum"] += float(y)
+        nodes[from_p]["passes_made"] += 1
+        
+        if to_p:
+            if to_p not in nodes:
+                nodes[to_p] = {"x_sum": 0.0, "y_sum": 0.0, "passes_made": 0, "passes_received": 0}
+            nodes[to_p]["passes_received"] += 1
+            
+            edge = (from_p, to_p)
+            edges_map[edge] = edges_map.get(edge, 0) + 1
+            
+    final_nodes = {}
+    for p, data in nodes.items():
+        if data["passes_made"] > 0:
+            final_nodes[p] = {
+                "x": data["x_sum"] / data["passes_made"],
+                "y": data["y_sum"] / data["passes_made"],
+                "passes_made": data["passes_made"],
+                "passes_received": data["passes_received"]
+            }
+        else:
+            final_nodes[p] = {
+                "x": None,
+                "y": None,
+                "passes_made": 0,
+                "passes_received": data["passes_received"]
+            }
+            
+    edges = [{"from": f, "to": t, "pass_count": c} for (f, t), c in edges_map.items()]
+    
+    return {
+        "team": normalized_team,
+        "period": period,
+        "nodes": final_nodes,
+        "edges": edges,
+    }
+
+
+def get_pass_sonars(team: str, period: int | None = None) -> dict[str, Any]:
+    import math
+    normalized_team = _normalize_optional_team(team)
+    if not normalized_team:
+        raise ValueError("Team is required for pass sonars.")
+
+    events = list_events(event_type="PASS", team=normalized_team, period=period, limit=1000)
+    
+    sonars: dict[str, Any] = {}
+    for event in events:
+        from_p = event.get("from_player")
+        x1 = event.get("start_x")
+        y1 = event.get("start_y")
+        x2 = event.get("end_x")
+        y2 = event.get("end_y")
+        
+        if not from_p or x1 is None or y1 is None or x2 is None or y2 is None:
+            continue
+            
+        dx = float(x2) - float(x1)
+        dy = float(y2) - float(y1)
+        
+        angle_rad = math.atan2(dy, dx)
+        angle_deg = math.degrees(angle_rad)
+        if angle_deg < 0:
+            angle_deg += 360
+            
+        bucket = int((angle_deg + 22.5) // 45) % 8
+        dist = math.hypot(dx, dy)
+        
+        if from_p not in sonars:
+            sonars[from_p] = {"x_sum": 0.0, "y_sum": 0.0, "passes": 0, "buckets": [0] * 8, "bucket_dist": [0.0] * 8}
+            
+        sonars[from_p]["x_sum"] += float(x1)
+        sonars[from_p]["y_sum"] += float(y1)
+        sonars[from_p]["passes"] += 1
+        sonars[from_p]["buckets"][bucket] += 1
+        sonars[from_p]["bucket_dist"][bucket] += dist
+
+    for p in sonars:
+        sonars[p]["x"] = sonars[p]["x_sum"] / sonars[p]["passes"]
+        sonars[p]["y"] = sonars[p]["y_sum"] / sonars[p]["passes"]
+        for b in range(8):
+            if sonars[p]["buckets"][b] > 0:
+                sonars[p]["bucket_dist"][b] /= sonars[p]["buckets"][b]
+            
+    return {"team": normalized_team, "period": period, "sonars": sonars}
 
 
 if __name__ == "__main__":

@@ -17,9 +17,12 @@ from backend.tools.db_engine import (
     find_event,
     get_buildup_tracking_window,
     get_event_tracking_window,
-    get_frame_team_metrics,
+    get_team_shape_metrics_for_coordinates,
     get_tracking_frame,
-    get_transition_tracking_window,
+    get_tracking_window,
+    get_pass_network,
+    get_pass_sonars,
+    get_physicality_summary,
     list_events,
     segment_sequence_events,
     summarize_team_event_chain,
@@ -365,6 +368,19 @@ def _extract_transition_intent(user_query: str) -> bool:
     ) is not None
     has_direction_phrase = re.search(r"\b(after|from)\b", user_query, flags=re.IGNORECASE) is not None
     return has_transition_phrase and has_direction_phrase
+
+
+def _extract_pass_network_intent(user_query: str) -> bool:
+    query = user_query.lower()
+    return "pass network" in query or "passing network" in query or "passing web" in query
+
+def _extract_pass_sonars_intent(user_query: str) -> bool:
+    query = user_query.lower()
+    return "sonar" in query or "passing flow" in query or "pass directions" in query
+
+def _extract_physicality_intent(user_query: str) -> bool:
+    query = user_query.lower()
+    return "physicality" in query or "work rate" in query or "distance run" in query or "sprint" in query or "hsr" in query
 
 
 def _event_comparison_label(event_pattern: dict[str, Any]) -> str:
@@ -735,6 +751,9 @@ def _finalize_analysis_result(result: dict[str, Any], wants_report: bool) -> dic
     context["has_comparison"] = context.get("comparison") is not None
     if context.get("comparison") is not None:
         context["comparison_kind"] = context["comparison"].get("comparison_kind")
+    context["has_pass_network"] = result.get("pass_network") is not None
+    context["has_pass_sonars"] = result.get("pass_sonars") is not None
+    context["has_physicality"] = result.get("physicality") is not None
     context["has_report"] = wants_report
     context["explanation"] = build_explanation(result)
     context["has_explanation"] = True
@@ -752,6 +771,61 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
     wants_report = _extract_report_intent(user_query)
     buildup_intent = _extract_buildup_intent(user_query)
     transition_intent = _extract_transition_intent(user_query)
+    pass_network_intent = _extract_pass_network_intent(user_query)
+
+    if pass_network_intent:
+        team_hint = _extract_team_hint(user_query) or "Home"
+        period_hint = _extract_period_hint(user_query)
+        network_data = get_pass_network(team=team_hint, period=period_hint)
+        result = {
+            "coordinates": {},
+            "sequence": None,
+            "pass_network": network_data,
+            "context": {
+                "query": user_query,
+                "frame": None,
+                "event": None,
+                "mode": "pass_network",
+            },
+        }
+        return _finalize_analysis_result(result, wants_report)
+
+    pass_sonars_intent = _extract_pass_sonars_intent(user_query)
+    if pass_sonars_intent:
+        team_hint = _extract_team_hint(user_query) or "Home"
+        period_hint = _extract_period_hint(user_query)
+        sonars_data = get_pass_sonars(team=team_hint, period=period_hint)
+        result = {
+            "coordinates": {},
+            "sequence": None,
+            "pass_sonars": sonars_data,
+            "context": {
+                "query": user_query,
+                "frame": None,
+                "event": None,
+                "mode": "pass_sonars",
+            },
+        }
+        return _finalize_analysis_result(result, wants_report)
+        
+    physicality_intent = _extract_physicality_intent(user_query)
+    if physicality_intent:
+        team_hint = _extract_team_hint(user_query) or "Home"
+        period_hint = _extract_period_hint(user_query) or 1
+        phys_data = get_physicality_summary(period=period_hint, team=team_hint)
+        result = {
+            "coordinates": {},
+            "sequence": None,
+            "physicality": phys_data,
+            "context": {
+                "query": user_query,
+                "frame": None,
+                "event": None,
+                "mode": "physicality",
+            },
+        }
+        return _finalize_analysis_result(result, wants_report)
+
     if not buildup_intent and not transition_intent:
         aggregate_result = _resolve_aggregate_query(user_query)
         if aggregate_result is not None:

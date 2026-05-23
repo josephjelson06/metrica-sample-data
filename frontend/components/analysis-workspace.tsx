@@ -512,14 +512,28 @@ function renderSequenceHighlightsPanel(sequenceSegments: SequenceSegments | null
     return null;
   }
 
-  const cards = [
-    renderSequenceHighlightCard("Immediate Pre-Event", sequenceSegments.immediate_pre_event),
-    renderSequenceHighlightCard("Immediate Post-Event", sequenceSegments.immediate_post_event),
-    renderSequenceHighlightCard("Last Same-Team Action Before", sequenceSegments.last_same_team_before_event),
-    renderSequenceHighlightCard("First Same-Team Action After", sequenceSegments.first_same_team_after_event),
-    renderSequenceHighlightCard("First Opponent Action After", sequenceSegments.first_opponent_after_event),
-    renderSequenceHighlightCard("First Same-Team Shot After", sequenceSegments.first_same_team_shot_after),
-  ].filter(Boolean);
+  const cardDefinitions = [
+    ["Immediate Pre-Event", sequenceSegments.immediate_pre_event],
+    ["Immediate Post-Event", sequenceSegments.immediate_post_event],
+    ["Last Same-Team Action Before", sequenceSegments.last_same_team_before_event],
+    ["First Same-Team Action After", sequenceSegments.first_same_team_after_event],
+    ["First Opponent Action After", sequenceSegments.first_opponent_after_event],
+    ["First Same-Team Shot After", sequenceSegments.first_same_team_shot_after],
+  ] as const;
+
+  const cards = cardDefinitions
+    .map(([title, record]) => {
+      if (!record) {
+        return null;
+      }
+
+      return (
+        <div key={title}>
+          {renderSequenceHighlightCard(title, record)}
+        </div>
+      );
+    })
+    .filter(Boolean);
 
   if (cards.length === 0) {
     return null;
@@ -974,6 +988,14 @@ function renderResultSurface(
   onOpenEventFrame: ((frame: number) => void) | null,
   onCopyReport: (() => void) | null,
   reportCopied: boolean,
+  passNetwork: any | null,
+  physicality: any | null,
+  passSonars: any | null,
+  showKinematics: boolean,
+  showVoronoi: boolean,
+  showConvexHull: boolean,
+  showLineHeights: boolean,
+  showThreatGrid: boolean,
 ) {
   if (!context) {
     return (
@@ -982,6 +1004,90 @@ function renderResultSurface(
         <p style={{ margin: "10px 0 0", color: "var(--muted)", lineHeight: 1.6 }}>
           Submit a query to load the first football analysis result.
         </p>
+      </div>
+    );
+  }
+
+  if (context.mode === "pass_network") {
+    return (
+      <div style={{ display: "grid", gap: 14 }}>
+        <div style={{ ...cardStyle(), padding: 20 }}>
+          <h3 style={sectionTitleStyle()}>Pass Network</h3>
+          <p style={{ margin: "8px 0 16px", color: "var(--muted)", lineHeight: 1.6 }}>
+            {context.query}
+          </p>
+          <PitchCanvas
+            coordinates={null}
+            passNetwork={passNetwork}
+          />
+        </div>
+        {renderExplanationPanel(context)}
+        {renderReportPanel(context, onCopyReport, reportCopied)}
+      </div>
+    );
+  }
+
+  if (context.mode === "pass_sonars") {
+    return (
+      <div style={{ display: "grid", gap: 14 }}>
+        <div style={{ ...cardStyle(), padding: 20 }}>
+          <h3 style={sectionTitleStyle()}>Pass Sonars</h3>
+          <p style={{ margin: "8px 0 16px", color: "var(--muted)", lineHeight: 1.6 }}>
+            {context.query}
+          </p>
+          <PitchCanvas
+            coordinates={null}
+            passSonars={passSonars}
+          />
+        </div>
+        {renderExplanationPanel(context)}
+        {renderReportPanel(context, onCopyReport, reportCopied)}
+      </div>
+    );
+  }
+
+  if (context.mode === "physicality") {
+    if (!physicality) {
+      return (
+        <div style={cardStyle()}>
+          <p style={{ margin: 0, color: "var(--muted)" }}>Loading physicality data...</p>
+        </div>
+      );
+    }
+    const players = Object.entries(physicality.players).sort((a: any, b: any) => b[1].total_distance - a[1].total_distance);
+    const maxDist = Math.max(1, (players[0]?.[1] as any)?.total_distance ?? 1);
+
+    return (
+      <div style={{ display: "grid", gap: 14 }}>
+        <div style={{ ...cardStyle(), padding: 20 }}>
+          <h3 style={sectionTitleStyle()}>Physicality Dashboard - {physicality.team}</h3>
+          <p style={{ margin: "8px 0 16px", color: "var(--muted)", lineHeight: 1.6 }}>
+            {context.query}
+          </p>
+          <div style={{ display: "grid", gap: 12 }}>
+            {players.map(([player, stats]: [string, any]) => (
+              <div key={player} style={{ display: "grid", gridTemplateColumns: "70px 1fr 70px", gap: 12, alignItems: "center" }}>
+                <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)" }}>{player}</span>
+                <div style={{ height: 24, background: "rgba(0,0,0,0.05)", borderRadius: 4, overflow: "hidden", display: "flex" }}>
+                  <div style={{ width: `${(stats.total_distance / maxDist) * 100}%`, background: "rgba(0,0,0,0.1)", display: "flex", position: "relative" }}>
+                    <div style={{ width: `${(stats.hsr_distance / stats.total_distance) * 100}%`, background: "#425443", height: "100%" }} />
+                    <div style={{ width: `${(stats.sprint_distance / stats.total_distance) * 100}%`, background: "#d75b1f", height: "100%" }} />
+                  </div>
+                </div>
+                <div style={{ fontSize: 13, color: "var(--muted)", textAlign: "right" }}>
+                  {(stats.total_distance / 1000).toFixed(1)} km
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 16, marginTop: 24, fontSize: 12, color: "var(--muted)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 12, height: 12, background: "rgba(0,0,0,0.1)", borderRadius: 2 }}/> Distance</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 12, height: 12, background: "#425443", borderRadius: 2 }}/> HSR</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 12, height: 12, background: "#d75b1f", borderRadius: 2 }}/> Sprint</div>
+          </div>
+        </div>
+        {renderExplanationPanel(context)}
+        {renderReportPanel(context, onCopyReport, reportCopied)}
       </div>
     );
   }
@@ -1014,6 +1120,11 @@ function renderResultSurface(
               sequenceEvents={sequenceEvents}
               framesPerSecond={replaySequence?.frames_per_second ?? 25}
               transitionMs={pitchTransitionMs}
+              showKinematics={showKinematics}
+              showVoronoi={showVoronoi}
+              showConvexHull={showConvexHull}
+              showLineHeights={showLineHeights}
+              showThreatGrid={showThreatGrid}
             />
           </div>
         ) : null}
@@ -1064,6 +1175,11 @@ function renderResultSurface(
               sequenceEvents={sequenceEvents}
               framesPerSecond={replaySequence?.frames_per_second ?? 25}
               transitionMs={pitchTransitionMs}
+              showKinematics={showKinematics}
+              showVoronoi={showVoronoi}
+              showConvexHull={showConvexHull}
+              showLineHeights={showLineHeights}
+              showThreatGrid={showThreatGrid}
             />
           </div>
         </div>
@@ -1077,6 +1193,11 @@ function renderResultSurface(
 export function AnalysisWorkspace() {
   const [reportCopied, setReportCopied] = useState(false);
   const [isCompactLayout, setIsCompactLayout] = useState(false);
+  const [showKinematics, setShowKinematics] = useState(true);
+  const [showVoronoi, setShowVoronoi] = useState(false);
+  const [showConvexHull, setShowConvexHull] = useState(false);
+  const [showLineHeights, setShowLineHeights] = useState(false);
+  const [showThreatGrid, setShowThreatGrid] = useState(false);
   const status = useAnalysisStore((state) => state.status);
   const query = useAnalysisStore((state) => state.query);
   const latestPayload = useAnalysisStore((state) => state.latestPayload);
@@ -1404,6 +1525,29 @@ export function AnalysisWorkspace() {
             </div>
           ) : null}
 
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 12, marginBottom: 12 }}>
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 14, color: "var(--ink)" }}>
+              <input type="checkbox" checked={showKinematics} onChange={(e) => setShowKinematics(e.target.checked)} />
+              Velocity Kinematics
+            </label>
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 14, color: "var(--ink)" }}>
+              <input type="checkbox" checked={showVoronoi} onChange={(e) => setShowVoronoi(e.target.checked)} />
+              Pitch Control (Voronoi)
+            </label>
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 14, color: "var(--ink)" }}>
+              <input type="checkbox" checked={showConvexHull} onChange={(e) => setShowConvexHull(e.target.checked)} />
+              Team Shape (Hull)
+            </label>
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 14, color: "var(--ink)" }}>
+              <input type="checkbox" checked={showLineHeights} onChange={(e) => setShowLineHeights(e.target.checked)} />
+              Unit Spacing (Lines)
+            </label>
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 14, color: "var(--ink)" }}>
+              <input type="checkbox" checked={showThreatGrid} onChange={(e) => setShowThreatGrid(e.target.checked)} />
+              Spatial Danger (xT)
+            </label>
+          </div>
+
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
             <button
               type="button"
@@ -1527,6 +1671,14 @@ export function AnalysisWorkspace() {
           openResultFrame,
           copyReport,
           reportCopied,
+          latestPayload?.pass_network ?? null,
+          latestPayload?.physicality ?? null,
+          latestPayload?.pass_sonars ?? null,
+          showKinematics,
+          showVoronoi,
+          showConvexHull,
+          showLineHeights,
+          showThreatGrid,
         )}
       </section>
     </main>

@@ -1,6 +1,9 @@
 export type CoordinatePoint = {
   x: number | null;
   y: number | null;
+  vx?: number | null;
+  vy?: number | null;
+  speed?: number | null;
 };
 
 export type CoordinateMap = Record<string, CoordinatePoint>;
@@ -133,6 +136,52 @@ export type SequenceComparison = {
   deltas: Record<string, number | null>;
 };
 
+export type PassNetworkNode = {
+  x: number | null;
+  y: number | null;
+  passes_made: number;
+  passes_received: number;
+};
+
+export type PassNetworkEdge = {
+  from: string;
+  to: string;
+  pass_count: number;
+};
+
+export type PassNetworkData = {
+  team: string;
+  period: number | null;
+  nodes: Record<string, PassNetworkNode>;
+  edges: PassNetworkEdge[];
+};
+
+export type PlayerPhysicality = {
+  total_distance: number;
+  hsr_distance: number;
+  sprint_distance: number;
+};
+
+export type PhysicalityData = {
+  period: number;
+  team: string;
+  players: Record<string, PlayerPhysicality>;
+};
+
+export type PlayerSonar = {
+  x: number;
+  y: number;
+  passes: number;
+  buckets: number[];
+  bucket_dist: number[];
+};
+
+export type PassSonarsData = {
+  team: string;
+  period: number | null;
+  sonars: Record<string, PlayerSonar>;
+};
+
 export type ComparisonContext = {
   team: string | null;
   left_label: string;
@@ -153,7 +202,10 @@ export type AnalysisMode =
   | "sequence_event"
   | "comparison"
   | "buildup"
-  | "transition";
+  | "transition"
+  | "pass_network"
+  | "pass_sonars"
+  | "physicality";
 
 export type AnalysisContext = {
   query: string;
@@ -178,6 +230,9 @@ export type AnalysisContext = {
   has_aggregate?: boolean;
   has_comparison?: boolean;
   comparison_kind?: string | null;
+  has_pass_network?: boolean;
+  has_pass_sonars?: boolean;
+  has_physicality?: boolean;
   has_report?: boolean;
   has_explanation?: boolean;
 };
@@ -186,6 +241,9 @@ export type DataRenderPayload = {
   view: "PITCH_HOME";
   data: CoordinateMap;
   sequence: TrackingSequence | null;
+  pass_network?: PassNetworkData | null;
+  pass_sonars?: PassSonarsData | null;
+  physicality?: PhysicalityData | null;
   context: AnalysisContext;
 };
 
