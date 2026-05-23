@@ -130,6 +130,15 @@ function actionButtonStyle() {
   } as const;
 }
 
+const suggestedQueries = [
+  "Show me the away team's second corner",
+  "How many away shots were there in period 2?",
+  "Show me the buildup to the goal",
+  "Show me the transition after the first away recovery",
+  "Compare the transition after the first and second away recoveries",
+  "Write a report on the away team's second corner",
+];
+
 function getPrimaryResultTitle(context: AnalysisContext | null) {
   if (!context) {
     return "Waiting For Analysis";
@@ -975,6 +984,11 @@ export function AnalysisWorkspace() {
     startTransition(() => requestFrame(frame));
   });
 
+  const runSuggestedQuery = useEffectEvent((nextQuery: string) => {
+    startTransition(() => setQuery(nextQuery));
+    sendQuery(nextQuery);
+  });
+
   const copyReport = useEffectEvent(() => {
     const report = latestPayload?.context.report;
     if (!report || typeof navigator === "undefined" || !navigator.clipboard) {
@@ -1078,6 +1092,22 @@ export function AnalysisWorkspace() {
         >
           Run Analysis Query
         </button>
+
+        <div style={{ display: "grid", gap: 10 }}>
+          <strong style={{ fontSize: 14 }}>Quick prompts</strong>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {suggestedQueries.map((suggestedQuery) => (
+              <button
+                key={suggestedQuery}
+                type="button"
+                onClick={() => runSuggestedQuery(suggestedQuery)}
+                style={actionButtonStyle()}
+              >
+                {suggestedQuery}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <div
           style={{
