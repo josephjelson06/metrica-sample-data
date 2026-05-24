@@ -152,6 +152,9 @@ export type PassNetworkEdge = {
 export type PassNetworkData = {
   team: string;
   period: number | null;
+  start_minute?: number | null;
+  end_minute?: number | null;
+  total_passes?: number;
   nodes: Record<string, PassNetworkNode>;
   edges: PassNetworkEdge[];
 };
@@ -216,6 +219,67 @@ export type ComparisonContext = {
   comparison_kind?: "moment" | "buildup_sequence" | "transition_sequence" | string | null;
 };
 
+// ── Orientation types ─────────────────────────────────────────────────────────
+
+export type PlayerLineupInfo = {
+  team: string;
+  role: string;
+  avg_x: number;
+  avg_y: number;
+  in_period_1: boolean;
+  in_period_2: boolean;
+  approx_start_min: number | null;
+  approx_end_min: number | null;
+};
+
+export type SubstitutionEvent = {
+  player: string;
+  team: string;
+  role: string;
+  event: "subbed_on" | "subbed_off";
+  approx_minute: number | null;
+  period: number;
+};
+
+export type FormationEstimate = {
+  team: string;
+  period: number | null;
+  formation: string;
+  avg_positions: { role: string; avg_x: number; avg_y: number }[];
+};
+
+export type OrientationData = {
+  lineup: { team: string | null; lineup: Record<string, PlayerLineupInfo> };
+  substitutions: SubstitutionEvent[];
+  formations: { Home: FormationEstimate; Away: FormationEstimate };
+  team: string | null;
+  period: number | null;
+};
+
+// ── Conversation types ────────────────────────────────────────────────────────
+
+export type SuggestedFollowUp = {
+  label: string;
+  query: string;
+};
+
+export type ConversationTurn = {
+  turn: number;
+  query: string;
+  mode: string | null;
+  summary: string;
+};
+
+export type ConversationContext = {
+  current_team: string | null;
+  current_period: number | null;
+  current_mode: string | null;
+  start_minute: number | null;
+  end_minute: number | null;
+  turn_count: number;
+  history: ConversationTurn[];
+};
+
 export type AnalysisMode =
   | "aggregate"
   | "frame"
@@ -229,7 +293,8 @@ export type AnalysisMode =
   | "physicality"
   | "synthesis"
   | "auto_insights"
-  | "set_piece";
+  | "set_piece"
+  | "orientation";
 
 export type AnalysisContext = {
   query: string;
@@ -242,6 +307,7 @@ export type AnalysisContext = {
   sequence_segments?: SequenceSegments | null;
   transition_summary?: TransitionSummary | null;
   mode: AnalysisMode;
+  period?: number | null;
   explanation?: string | null;
   report?: string | null;
   response_contract_version?: string;
@@ -272,6 +338,9 @@ export type DataRenderPayload = {
   physicality?: PhysicalityData | null;
   auto_insights?: AutoInsight[] | null;
   set_piece_analysis?: SetPieceAnalysis | null;
+  orientation?: OrientationData | null;
+  follow_up_suggestions?: SuggestedFollowUp[] | null;
+  conversation_context?: ConversationContext | null;
   context: AnalysisContext;
 };
 

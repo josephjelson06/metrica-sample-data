@@ -22,10 +22,14 @@ from backend.tools.db_engine import (
     get_tracking_frame,
     get_tracking_window,
     get_pass_network,
+    get_pass_network_windowed,
     get_pass_sonars,
     get_physicality_summary,
     find_dangerous_transitions,
     analyze_set_piece,
+    get_lineup_and_roles,
+    get_formation_estimate,
+    get_substitution_timeline,
     list_events,
     segment_sequence_events,
     summarize_team_event_chain,
@@ -441,6 +445,33 @@ def _extract_set_piece_intent(user_query: str) -> bool:
     query = user_query.lower()
     return "set piece analysis" in query or "analyze corner" in query or "marking" in query or "free kick structure" in query
 
+def _extract_orientation_intent(user_query: str) -> bool:
+    query = user_query.lower()
+    return any(kw in query for kw in [
+        "lineup", "lineups", "show me my players", "who played", "who was on",
+        "substitut", "formation", "starting xi", "squad", "who started",
+        "show me the team", "show me players",
+    ])
+
+def _extract_time_window_hint(user_query: str) -> tuple[float | None, float | None]:
+    """Returns (start_minute, end_minute) if a time window is detected."""
+    query = user_query.lower()
+    # Pattern: "between 30 and 45", "from 30 to 45", "30-45 minutes", "30 to 45"
+    m = re.search(r'(?:between|from)?\s*(\d+)\s*(?:to|and|-)\s*(\d+)\s*(?:min|minute|mins)?', query)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+    # Pattern: "after minute 60", "after the 60th"
+    m = re.search(r'after\s+(?:minute|min)?\s*(\d+)', query)
+    if m:
+        return float(m.group(1)), None
+    # Pattern: "first half only" -> 0-45
+    if "first half" in query and any(w in query for w in ["only", "just", "during"]):
+        return 0.0, 45.0
+    # Pattern: "second half only" -> 45-90
+    if "second half" in query and any(w in query for w in ["only", "just", "during"]):
+        return 45.0, 90.0
+    return None, None
+
 
 def _event_comparison_label(event_pattern: dict[str, Any]) -> str:
     subtype = str(event_pattern.get("subtype_contains") or "").lower()
@@ -825,19 +856,114 @@ def _finalize_analysis_result(result: dict[str, Any], wants_report: bool) -> dic
     return result
 
 
-def route_analysis_query(user_query: str) -> dict[str, Any]:
+def _build_follow_up_suggestions(mode: str, team: str | None, period: int | None) -> list[dict[str, str]]:
+    """Generate 3 context-aware follow-up suggestion chips."""
+    t = team or "Home"
+    opp = "Away" if t == "Home" else "Home"
+    p_label = f" in period {period}" if period else ""
+
+    suggestions_by_mode: dict[str, list[dict[str, str]]] = {
+        "orientation": [
+            {"label": "Pass network", "query": f"Show me the {t} team pass network"},
+            {"label": "Physicality", "query": f"Show physicality for {t}"},
+            {"label": "Dangerous transitions", "query": f"Show dangerous transitions for {t}"},
+        ],
+        "pass_network": [
+            {"label": f"Show {opp} network", "query": f"Show me the {opp} team pass network"},
+            {"label": "First half only", "query": f"Show {t} pass network from 0 to 45 minutes"},
+            {"label": "Pass sonars", "query": f"Show pass sonars for {t}"},
+        ],
+        "pass_sonars": [
+            {"label": f"Compare {opp}", "query": f"Show pass sonars for {opp}"},
+            {"label": "Pass network", "query": f"Show {t} pass network"},
+            {"label": "Physicality", "query": f"Show physicality for {t}"},
+        ],
+        "physicality": [
+            {"label": f"{opp} team", "query": f"Show physicality for {opp}"},
+            {"label": "Period 1 only", "query": f"Show physicality for {t} in period 1"},
+            {"label": "Dangerous transitions", "query": f"Show dangerous transitions for {t}"},
+        ],
+        "auto_insights": [
+            {"label": f"{opp} transitions", "query": f"Show dangerous transitions for {opp}"},
+            {"label": "Pass network", "query": f"Show {t} pass network"},
+            {"label": "Set piece analysis", "query": f"Analyze set piece marking for {t}"},
+        ],
+        "set_piece": [
+            {"label": "Pass network", "query": f"Show {t} pass network"},
+            {"label": "Dangerous transitions", "query": f"Show dangerous transitions for {t}"},
+            {"label": f"{opp} set piece", "query": f"Analyze set piece marking for {opp}"},
+        ],
+        "synthesis": [
+            {"label": "Full pass network", "query": f"Show {t} pass network"},
+            {"label": "Physicality", "query": f"Show physicality for {t}"},
+            {"label": f"{opp} team", "query": f"Analyze {opp} team tactics"},
+        ],
+    }
+    return suggestions_by_mode.get(mode, [
+        {"label": "Home pass network", "query": "Show me the Home team pass network"},
+        {"label": "Physicality", "query": "Show physicality for Home"},
+        {"label": "Lineups", "query": "Show me the lineups"},
+    ])
+
+
+def route_analysis_query(user_query: str, conversation_context: dict[str, Any] | None = None) -> dict[str, Any]:
     if not user_query or not user_query.strip():
         raise ValueError("user_query must be a non-empty string.")
+    if conversation_context is None:
+        conversation_context = {}
 
     wants_report = _extract_report_intent(user_query)
     buildup_intent = _extract_buildup_intent(user_query)
     transition_intent = _extract_transition_intent(user_query)
-    pass_network_intent = _extract_pass_network_intent(user_query)
 
+    # Inherit team/period from conversation context when not explicit in query
+    ctx_team = conversation_context.get("current_team")
+    ctx_period = conversation_context.get("current_period")
+
+    # ── Level 1: Orientation ─────────────────────────────────────────────────
+    orientation_intent = _extract_orientation_intent(user_query)
+    if orientation_intent:
+        team_hint = _extract_team_hint(user_query) or ctx_team
+        period_hint = _extract_period_hint(user_query) or ctx_period
+        lineup = get_lineup_and_roles(team=team_hint)
+        subs = get_substitution_timeline()
+        formation_home = get_formation_estimate(team="Home", period=period_hint)
+        formation_away = get_formation_estimate(team="Away", period=period_hint)
+        orientation_data = {
+            "lineup": lineup,
+            "substitutions": subs,
+            "formations": {"Home": formation_home, "Away": formation_away},
+            "team": team_hint,
+            "period": period_hint,
+        }
+        result = {
+            "coordinates": {},
+            "sequence": None,
+            "orientation": orientation_data,
+            "context": {
+                "query": user_query,
+                "frame": None,
+                "event": None,
+                "mode": "orientation",
+                "period": period_hint,
+            },
+        }
+        result["follow_up_suggestions"] = _build_follow_up_suggestions("orientation", team_hint, period_hint)
+        return _finalize_analysis_result(result, wants_report)
+
+    # ── Level 2: Pass Network (with optional time window) ────────────────────
+    pass_network_intent = _extract_pass_network_intent(user_query)
     if pass_network_intent:
-        team_hint = _extract_team_hint(user_query) or "Home"
-        period_hint = _extract_period_hint(user_query)
-        network_data = get_pass_network(team=team_hint, period=period_hint)
+        team_hint = _extract_team_hint(user_query) or ctx_team or "Home"
+        period_hint = _extract_period_hint(user_query) or ctx_period
+        start_min, end_min = _extract_time_window_hint(user_query)
+        if start_min is not None or end_min is not None:
+            network_data = get_pass_network_windowed(
+                team=team_hint, period=period_hint,
+                start_minute=start_min, end_minute=end_min,
+            )
+        else:
+            network_data = get_pass_network(team=team_hint, period=period_hint)
         result = {
             "coordinates": {},
             "sequence": None,
@@ -847,14 +973,16 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 "frame": None,
                 "event": None,
                 "mode": "pass_network",
+                "period": period_hint,
             },
         }
+        result["follow_up_suggestions"] = _build_follow_up_suggestions("pass_network", team_hint, period_hint)
         return _finalize_analysis_result(result, wants_report)
 
     pass_sonars_intent = _extract_pass_sonars_intent(user_query)
     if pass_sonars_intent:
-        team_hint = _extract_team_hint(user_query) or "Home"
-        period_hint = _extract_period_hint(user_query)
+        team_hint = _extract_team_hint(user_query) or ctx_team or "Home"
+        period_hint = _extract_period_hint(user_query) or ctx_period
         sonars_data = get_pass_sonars(team=team_hint, period=period_hint)
         result = {
             "coordinates": {},
@@ -865,14 +993,16 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 "frame": None,
                 "event": None,
                 "mode": "pass_sonars",
+                "period": period_hint,
             },
         }
+        result["follow_up_suggestions"] = _build_follow_up_suggestions("pass_sonars", team_hint, period_hint)
         return _finalize_analysis_result(result, wants_report)
         
     physicality_intent = _extract_physicality_intent(user_query)
     if physicality_intent:
-        team_hint = _extract_team_hint(user_query) or "Home"
-        period_hint = _extract_period_hint(user_query) or 1
+        team_hint = _extract_team_hint(user_query) or ctx_team or "Home"
+        period_hint = _extract_period_hint(user_query) or ctx_period or 1
         phys_data = get_physicality_summary(period=period_hint, team=team_hint)
         result = {
             "coordinates": {},
@@ -883,13 +1013,15 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 "frame": None,
                 "event": None,
                 "mode": "physicality",
+                "period": period_hint,
             },
         }
+        result["follow_up_suggestions"] = _build_follow_up_suggestions("physicality", team_hint, period_hint)
         return _finalize_analysis_result(result, wants_report)
 
     pattern_intent = _extract_pattern_recognition_intent(user_query)
     if pattern_intent:
-        team_hint = _extract_team_hint(user_query) or "Home"
+        team_hint = _extract_team_hint(user_query) or ctx_team or "Home"
         insights = find_dangerous_transitions(team=team_hint)
         result = {
             "coordinates": {},
@@ -902,15 +1034,13 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 "mode": "auto_insights",
             },
         }
+        result["follow_up_suggestions"] = _build_follow_up_suggestions("auto_insights", team_hint, None)
         return _finalize_analysis_result(result, wants_report)
 
     set_piece_intent = _extract_set_piece_intent(user_query)
     if set_piece_intent:
-        # Find the specific event they are asking for or just grab the first set piece
-        event_hint = _extract_event_hint(user_query)
-        team_hint = _extract_team_hint(user_query)
-        period_hint = _extract_period_hint(user_query)
-        # target_events = list_events() isn't easy here, let's use find_event
+        team_hint = _extract_team_hint(user_query) or ctx_team
+        period_hint = _extract_period_hint(user_query) or ctx_period
         try:
             target_event = find_event(event_type="SET PIECE", team=team_hint, period=period_hint, occurrence=1)
             analysis = analyze_set_piece(target_event)
@@ -925,9 +1055,10 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                     "mode": "set_piece",
                 },
             }
+            result["follow_up_suggestions"] = _build_follow_up_suggestions("set_piece", team_hint, period_hint)
             return _finalize_analysis_result(result, wants_report)
-        except Exception as e:
-            pass # fallback to default routing if event not found
+        except Exception:
+            pass  # fallback to default routing if event not found
 
     if not buildup_intent and not transition_intent:
         aggregate_result = _resolve_aggregate_query(user_query)

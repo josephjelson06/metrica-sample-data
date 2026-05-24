@@ -2,9 +2,16 @@
 
 import { create } from "zustand";
 
-import type { ConnectionStatus, DataRenderPayload, ServerMessage } from "@/lib/types";
+import type {
+  ConnectionStatus,
+  ConversationContext,
+  ConversationTurn,
+  DataRenderPayload,
+  ServerMessage,
+  SuggestedFollowUp,
+} from "@/lib/types";
 
-const DEFAULT_QUERY = "Show me the away team's second corner";
+const DEFAULT_QUERY = "Show me the lineups";
 const MAX_TRACKING_FRAME = 141156;
 
 type AnalysisStore = {
@@ -17,6 +24,10 @@ type AnalysisStore = {
   playbackStep: number;
   playbackIntervalMs: number;
   sequenceFrameIndex: number;
+  // Conversation state
+  conversationContext: ConversationContext | null;
+  conversationHistory: ConversationTurn[];
+  followUpSuggestions: SuggestedFollowUp[];
   setQuery: (query: string) => void;
   connect: () => void;
   disconnect: () => void;
@@ -52,6 +63,9 @@ export const useAnalysisStore = create<AnalysisStore>((set, get) => ({
   playbackStep: 25,
   playbackIntervalMs: 250,
   sequenceFrameIndex: 0,
+  conversationContext: null,
+  conversationHistory: [],
+  followUpSuggestions: [],
 
   setQuery: (query) => set({ query }),
 
@@ -97,13 +111,23 @@ export const useAnalysisStore = create<AnalysisStore>((set, get) => ({
         return;
       }
 
-      const incomingSequence = message.payload.sequence;
+      const payload = message.payload;
+      const incomingSequence = payload.sequence;
+
+      // Extract conversation context and follow-ups from payload
+      const convCtx = payload.conversation_context ?? null;
+      const suggestions = payload.follow_up_suggestions ?? [];
+      const newHistory = convCtx?.history ?? [];
+
       set({
-        latestPayload: message.payload,
+        latestPayload: payload,
         errorMessage: null,
         status: "connected",
         sequenceFrameIndex: 0,
         isPlaying: Boolean(incomingSequence && incomingSequence.frames.length > 1),
+        conversationContext: convCtx,
+        conversationHistory: newHistory,
+        followUpSuggestions: suggestions,
       });
     });
 

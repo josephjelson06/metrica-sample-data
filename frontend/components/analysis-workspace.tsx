@@ -993,12 +993,14 @@ function renderResultSurface(
   passSonars: any | null,
   autoInsights: any | null,
   setPieceAnalysis: any | null,
+  orientation: any | null,
   showKinematics: boolean,
   showVoronoi: boolean,
   showConvexHull: boolean,
   showLineHeights: boolean,
   showThreatGrid: boolean,
 ) {
+
   if (!context) {
     return (
       <div style={cardStyle()}>
@@ -1006,6 +1008,20 @@ function renderResultSurface(
         <p style={{ margin: "10px 0 0", color: "var(--muted)", lineHeight: 1.6 }}>
           Submit a query to load the first football analysis result.
         </p>
+      </div>
+    );
+  }
+
+  if (context.mode === "orientation") {
+    return (
+      <div style={{ display: "grid", gap: 14 }}>
+        <div style={{ ...cardStyle(), padding: 20 }}>
+          <h3 style={sectionTitleStyle()}>Team Orientation</h3>
+          <p style={{ margin: "8px 0 16px", color: "var(--muted)", lineHeight: 1.6 }}>{context.query}</p>
+          {renderOrientationPanel(orientation)}
+        </div>
+        {renderExplanationPanel(context)}
+        {renderReportPanel(context, onCopyReport, reportCopied)}
       </div>
     );
   }
@@ -1319,8 +1335,404 @@ function renderResultSurface(
   );
 }
 
+
+// ── ORIENTATION PANEL ────────────────────────────────────────────────────────
+
+function renderOrientationPanel(orientation: any | null | undefined) {
+  if (!orientation) return null;
+
+  const lineupMap: Record<string, any> = orientation.lineup?.lineup ?? {};
+  const subs: any[] = orientation.substitutions ?? [];
+  const formations: any = orientation.formations ?? {};
+
+  const homeFormation = formations.Home?.formation ?? "—";
+  const awayFormation = formations.Away?.formation ?? "—";
+
+  const homePlayers = Object.entries(lineupMap)
+    .filter(([, info]: [string, any]) => info.team === "Home")
+    .sort((a: any, b: any) => a[1].avg_x - b[1].avg_x);
+  const awayPlayers = Object.entries(lineupMap)
+    .filter(([, info]: [string, any]) => info.team === "Away")
+    .sort((a: any, b: any) => a[1].avg_x - b[1].avg_x);
+
+  const PITCH_W = 420;
+  const PITCH_H = 260;
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      {/* Formation badges */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        {[
+          { label: "Home Formation", value: homeFormation, color: "#d4a96a" },
+          { label: "Away Formation", value: awayFormation, color: "#6aafcf" },
+        ].map(({ label, value, color }) => (
+          <div
+            key={label}
+            style={{
+              borderRadius: 14,
+              padding: "14px 18px",
+              background: "rgba(255,255,255,0.72)",
+              border: "1px solid rgba(21,32,23,0.09)",
+              textAlign: "center",
+            }}
+          >
+            <p style={{ margin: "0 0 4px", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--muted)" }}>
+              {label}
+            </p>
+            <strong style={{ fontSize: "1.7rem", color }}>{value}</strong>
+            <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--muted)" }}>estimated</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Average position mini-pitch */}
+      <div
+        style={{
+          borderRadius: 14,
+          padding: "16px 18px",
+          background: "rgba(255,255,255,0.72)",
+          border: "1px solid rgba(21,32,23,0.09)",
+        }}
+      >
+        <h3 style={{ margin: "0 0 12px", fontSize: "0.9rem", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          Average Positions
+        </h3>
+        <svg
+          viewBox={`0 0 ${PITCH_W} ${PITCH_H}`}
+          style={{ width: "100%", borderRadius: 8, background: "#2d5a27" }}
+        >
+          {/* Pitch lines */}
+          <rect x={0} y={0} width={PITCH_W} height={PITCH_H} fill="#2d5a27" />
+          <rect x={10} y={10} width={PITCH_W - 20} height={PITCH_H - 20} fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
+          <line x1={PITCH_W / 2} y1={10} x2={PITCH_W / 2} y2={PITCH_H - 10} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
+          <circle cx={PITCH_W / 2} cy={PITCH_H / 2} r={30} fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
+
+          {/* Home players (left→right: defensive→attacking) */}
+          {homePlayers.map(([pid, info]: [string, any]) => {
+            const cx = 10 + info.avg_x * (PITCH_W - 20);
+            const cy = 10 + info.avg_y * (PITCH_H - 20);
+            const shortName = pid.replace("Home_Player", "H") ;
+            return (
+              <g key={pid}>
+                <circle cx={cx} cy={cy} r={10} fill="#d4a96a" stroke="#fff" strokeWidth={1.5} />
+                <text x={cx} y={cy + 4} textAnchor="middle" fontSize={8} fill="#1a1a1a" fontWeight="bold">
+                  {shortName}
+                </text>
+                <text x={cx} y={cy + 17} textAnchor="middle" fontSize={7} fill="rgba(255,255,255,0.8)">
+                  {info.role}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Away players */}
+          {awayPlayers.map(([pid, info]: [string, any]) => {
+            const cx = 10 + (1 - info.avg_x) * (PITCH_W - 20);
+            const cy = 10 + info.avg_y * (PITCH_H - 20);
+            const shortName = pid.replace("Away_Player", "A");
+            return (
+              <g key={pid}>
+                <circle cx={cx} cy={cy} r={10} fill="#6aafcf" stroke="#fff" strokeWidth={1.5} />
+                <text x={cx} y={cy + 4} textAnchor="middle" fontSize={8} fill="#1a1a1a" fontWeight="bold">
+                  {shortName}
+                </text>
+                <text x={cx} y={cy + 17} textAnchor="middle" fontSize={7} fill="rgba(255,255,255,0.8)">
+                  {info.role}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+        <div style={{ display: "flex", gap: 16, marginTop: 10, justifyContent: "center" }}>
+          <span style={{ fontSize: 12, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#d4a96a", display: "inline-block" }} />
+            Home
+          </span>
+          <span style={{ fontSize: 12, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#6aafcf", display: "inline-block" }} />
+            Away
+          </span>
+        </div>
+      </div>
+
+      {/* Lineup tables */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        {[
+          { label: "Home", players: homePlayers, color: "#d4a96a" },
+          { label: "Away", players: awayPlayers, color: "#6aafcf" },
+        ].map(({ label, players, color }) => (
+          <div
+            key={label}
+            style={{
+              borderRadius: 14,
+              overflow: "hidden",
+              border: "1px solid rgba(21,32,23,0.09)",
+              background: "rgba(255,255,255,0.72)",
+            }}
+          >
+            <div style={{ padding: "10px 14px", background: color + "22", borderBottom: "1px solid rgba(21,32,23,0.06)" }}>
+              <strong style={{ fontSize: 13, color }}>{label}</strong>
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr style={{ color: "var(--muted)" }}>
+                  <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600 }}>Player</th>
+                  <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600 }}>Role</th>
+                  <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600 }}>Periods</th>
+                </tr>
+              </thead>
+              <tbody>
+                {players.map(([pid, info]: [string, any]) => (
+                  <tr key={pid} style={{ borderTop: "1px solid rgba(21,32,23,0.05)" }}>
+                    <td style={{ padding: "8px 12px", fontWeight: 600, color: "var(--ink)" }}>
+                      {pid.replace("Home_", "").replace("Away_", "")}
+                    </td>
+                    <td style={{ padding: "8px 12px" }}>
+                      <span style={{
+                        display: "inline-block",
+                        padding: "2px 7px",
+                        borderRadius: 999,
+                        background: color + "22",
+                        color: color,
+                        fontWeight: 700,
+                        fontSize: 11,
+                      }}>
+                        {info.role}
+                      </span>
+                    </td>
+                    <td style={{ padding: "8px 12px", color: "var(--muted)" }}>
+                      {[info.in_period_1 && "P1", info.in_period_2 && "P2"].filter(Boolean).join(" + ") || "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+      </div>
+
+      {/* Substitutions */}
+      {subs.length > 0 && (
+        <div
+          style={{
+            borderRadius: 14,
+            padding: "14px 18px",
+            background: "rgba(255,255,255,0.72)",
+            border: "1px solid rgba(21,32,23,0.09)",
+          }}
+        >
+          <h3 style={{ margin: "0 0 12px", fontSize: "0.9rem", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Substitution Events (estimated)
+          </h3>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {subs.map((sub: any, i: number) => (
+              <div
+                key={i}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 10,
+                  background: sub.event === "subbed_on" ? "rgba(34,100,56,0.12)" : "rgba(180,50,30,0.1)",
+                  border: `1px solid ${sub.event === "subbed_on" ? "rgba(34,100,56,0.2)" : "rgba(180,50,30,0.2)"}`,
+                  fontSize: 12,
+                }}
+              >
+                <span style={{ fontWeight: 700, color: "var(--ink)" }}>
+                  {sub.player.replace("Home_", "").replace("Away_", "")}
+                </span>
+                <span style={{ color: "var(--muted)", marginLeft: 6 }}>
+                  {sub.event === "subbed_on" ? "▲ On" : "▼ Off"} · ~{sub.approx_minute}min · P{sub.period}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── CONTEXT RIBBON ────────────────────────────────────────────────────────────
+
+function ContextRibbon({ conversationContext }: { conversationContext: any | null }) {
+  if (!conversationContext || conversationContext.turn_count === 0) return null;
+
+  const pills = [
+    conversationContext.current_team && { label: conversationContext.current_team, icon: "⚽" },
+    conversationContext.current_period && { label: `Period ${conversationContext.current_period}`, icon: "🕐" },
+    conversationContext.current_mode && {
+      label: conversationContext.current_mode.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
+      icon: "📊",
+    },
+    conversationContext.start_minute != null && conversationContext.end_minute != null && {
+      label: `${conversationContext.start_minute}–${conversationContext.end_minute} min`,
+      icon: "⏱",
+    },
+  ].filter(Boolean) as { label: string; icon: string }[];
+
+  if (pills.length === 0) return null;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 8,
+        padding: "10px 0",
+        borderBottom: "1px solid rgba(21,32,23,0.07)",
+        marginBottom: 4,
+      }}
+    >
+      <span style={{ fontSize: 11, color: "var(--muted)", alignSelf: "center", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+        Context:
+      </span>
+      {pills.map(({ label, icon }) => (
+        <span
+          key={label}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+            padding: "4px 10px",
+            borderRadius: 999,
+            background: "rgba(180, 120, 50, 0.1)",
+            border: "1px solid rgba(180,120,50,0.22)",
+            fontSize: 12,
+            fontWeight: 600,
+            color: "#8a5c1e",
+          }}
+        >
+          {icon} {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// ── FOLLOW-UP CHIPS ───────────────────────────────────────────────────────────
+
+function FollowUpChips({
+  suggestions,
+  onSelect,
+}: {
+  suggestions: { label: string; query: string }[];
+  onSelect: (query: string) => void;
+}) {
+  if (!suggestions || suggestions.length === 0) return null;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 8,
+        padding: "14px 0 4px",
+        borderTop: "1px solid rgba(21,32,23,0.07)",
+        marginTop: 4,
+      }}
+    >
+      <span style={{ fontSize: 11, color: "var(--muted)", alignSelf: "center", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+        Ask next:
+      </span>
+      {suggestions.map(({ label, query }) => (
+        <button
+          key={label}
+          type="button"
+          onClick={() => onSelect(query)}
+          style={{
+            border: "1px solid rgba(27,54,92,0.22)",
+            borderRadius: 999,
+            padding: "6px 14px",
+            background: "rgba(27,54,92,0.07)",
+            color: "#1b365c",
+            fontWeight: 600,
+            fontSize: 13,
+            cursor: "pointer",
+            transition: "background 0.15s, box-shadow 0.15s",
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = "rgba(27,54,92,0.15)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = "rgba(27,54,92,0.07)";
+          }}
+        >
+          {label} →
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── HISTORY STRIP ─────────────────────────────────────────────────────────────
+
+const MODE_ICON: Record<string, string> = {
+  orientation: "🪪",
+  pass_network: "🕸",
+  pass_sonars: "📡",
+  physicality: "⚡",
+  auto_insights: "🔍",
+  set_piece: "⛳",
+  comparison: "⚖",
+  buildup: "📈",
+  transition: "⚡",
+  aggregate: "🔢",
+  synthesis: "🧬",
+};
+
+function HistoryStrip({
+  history,
+  onReplay,
+}: {
+  history: { turn: number; query: string; mode: string | null; summary: string }[];
+  onReplay: (query: string) => void;
+}) {
+  if (!history || history.length === 0) return null;
+
+  return (
+    <div style={{ display: "grid", gap: 6 }}>
+      <p style={{ margin: 0, fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+        Conversation Trail
+      </p>
+      {[...history].reverse().map((turn) => (
+        <button
+          key={turn.turn}
+          type="button"
+          onClick={() => onReplay(turn.query)}
+          title={turn.query}
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 10,
+            padding: "10px 12px",
+            borderRadius: 12,
+            border: "1px solid rgba(21,32,23,0.08)",
+            background: "rgba(255,255,255,0.7)",
+            cursor: "pointer",
+            textAlign: "left",
+            width: "100%",
+            transition: "background 0.12s",
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.95)"; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.7)"; }}
+        >
+          <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>
+            {MODE_ICON[turn.mode ?? ""] ?? "💬"}
+          </span>
+          <span style={{ fontSize: 12, color: "var(--ink)", lineHeight: 1.45, overflow: "hidden" }}>
+            <strong style={{ display: "block", marginBottom: 2, color: "var(--muted)", fontSize: 11 }}>
+              Turn {turn.turn} · {(turn.mode ?? "—").replace(/_/g, " ")}
+            </strong>
+            {turn.query.length > 80 ? turn.query.slice(0, 80) + "…" : turn.query}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function AnalysisWorkspace() {
   const [reportCopied, setReportCopied] = useState(false);
+  const [animKey, setAnimKey] = useState(0);
   const [isCompactLayout, setIsCompactLayout] = useState(false);
   const [showKinematics, setShowKinematics] = useState(true);
   const [showVoronoi, setShowVoronoi] = useState(false);
@@ -1343,6 +1755,9 @@ export function AnalysisWorkspace() {
   const setQuery = useAnalysisStore((state) => state.setQuery);
   const togglePlayback = useAnalysisStore((state) => state.togglePlayback);
   const setPlaying = useAnalysisStore((state) => state.setPlaying);
+  const conversationContext = useAnalysisStore((state) => state.conversationContext);
+  const conversationHistory = useAnalysisStore((state) => state.conversationHistory);
+  const followUpSuggestions = useAnalysisStore((state) => state.followUpSuggestions);
 
   const activeSequenceFrame = latestPayload?.sequence?.frames[sequenceFrameIndex] ?? null;
   const displayedCoordinates = activeSequenceFrame?.coordinates ?? latestPayload?.data ?? null;
@@ -1373,6 +1788,13 @@ export function AnalysisWorkspace() {
       disconnect();
     };
   }, []);
+
+  // Advance animKey whenever a new payload arrives to trigger CSS transitions
+  useEffect(() => {
+    if (latestPayload) {
+      setAnimKey((k) => k + 1);
+    }
+  }, [latestPayload]);
 
   useEffect(() => {
     const syncLayout = () => {
@@ -1462,10 +1884,10 @@ export function AnalysisWorkspace() {
             lineHeight: 0.95,
           }}
         >
-          Tactical Cinema Console
+          Tactical Intelligence Tablet
         </h1>
         <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.6 }}>
-          The frontend is now moving from one pitch-first page into a result-aware football analysis workspace with dedicated surfaces for replay, aggregate, comparison, and report outputs.
+          Ask the analyst anything — lineups, pass patterns, physical intensity, dangerous moments. Each answer builds context for the next question.
         </p>
 
         <div
@@ -1535,6 +1957,20 @@ export function AnalysisWorkspace() {
             ))}
           </div>
         </div>
+
+        {/* Conversation History Strip */}
+        {conversationHistory.length > 0 && (
+          <div
+            style={{
+              borderRadius: 18,
+              padding: "14px 16px",
+              background: "rgba(255,255,255,0.62)",
+              border: "1px solid rgba(21,32,23,0.08)",
+            }}
+          >
+            <HistoryStrip history={conversationHistory} onReplay={runSuggestedQuery} />
+          </div>
+        )}
 
         <div
           style={{
@@ -1765,6 +2201,9 @@ export function AnalysisWorkspace() {
           gap: "14px",
         }}
       >
+        {/* Context Ribbon */}
+        <ContextRibbon conversationContext={conversationContext} />
+
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
           <h2 style={{ margin: 0, fontFamily: "var(--font-display), serif", fontSize: "1.55rem" }}>
             {getPrimaryResultTitle(context)}
@@ -1789,6 +2228,13 @@ export function AnalysisWorkspace() {
           {renderPrimarySummary(context, activeFrame, hasSequence, clipStartLabel, clipEndLabel)}
         </div>
 
+        {/* Animated result panel — fades in on each new payload */}
+        <div
+          key={animKey}
+          style={{
+            animation: "fadeSlideUp 0.35s cubic-bezier(0.22, 1, 0.36, 1) both",
+          }}
+        >
         {renderResultSurface(
           context,
           displayedCoordinates,
@@ -1805,12 +2251,18 @@ export function AnalysisWorkspace() {
           latestPayload?.pass_sonars ?? null,
           latestPayload?.auto_insights ?? null,
           latestPayload?.set_piece_analysis ?? null,
+          latestPayload?.orientation ?? null,
           showKinematics,
           showVoronoi,
           showConvexHull,
           showLineHeights,
           showThreatGrid,
         )}
+        </div>
+
+        {/* Follow-up suggestion chips */}
+        <FollowUpChips suggestions={followUpSuggestions} onSelect={runSuggestedQuery} />
+
       </section>
     </main>
   );
