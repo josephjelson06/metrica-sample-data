@@ -130,13 +130,16 @@ function actionButtonStyle() {
   } as const;
 }
 
+// Level 1 → Level 2 → Level 3 starter prompts for the coach
 const suggestedQueries = [
+  "Show me the lineups",
+  "Show me the Home team pass network",
+  "Show pass sonars for Away",
+  "Show physicality for Home",
+  "Show dangerous transitions for Home",
+  "Analyze set piece marking for Away",
+  "Show me Home pass network from 30 to 45 minutes",
   "Show me the away team's second corner",
-  "How many away shots were there in period 2?",
-  "Show me the buildup to the goal",
-  "Show me the transition after the first away recovery",
-  "Compare the transition after the first and second away recoveries",
-  "Write a report on the away team's second corner",
 ];
 
 function getPrimaryResultTitle(context: AnalysisContext | null) {
@@ -145,21 +148,21 @@ function getPrimaryResultTitle(context: AnalysisContext | null) {
   }
 
   switch (context.mode) {
-    case "aggregate":
-      return "Aggregate View";
-    case "comparison":
-      return "Comparison View";
-    case "buildup":
-      return "Buildup View";
-    case "transition":
-      return "Transition View";
-    case "sequence_event":
-      return "Sequence Event View";
-    case "frame":
-      return "Frame View";
+    case "orientation":  return "Team Orientation";
+    case "pass_network": return "Pass Network";
+    case "pass_sonars":  return "Pass Sonars";
+    case "physicality":  return "Physicality Dashboard";
+    case "auto_insights":return "Dangerous Transitions";
+    case "set_piece":    return "Set-Piece Analysis";
+    case "aggregate":    return "Aggregate View";
+    case "comparison":   return "Comparison View";
+    case "buildup":      return "Buildup View";
+    case "transition":   return "Transition View";
+    case "sequence_event": return "Sequence Event View";
+    case "frame":        return "Frame View";
+    case "synthesis":    return "Multi-Primitive Synthesis";
     case "event":
-    default:
-      return "Match View";
+    default:             return "Match View";
   }
 }
 
@@ -908,7 +911,71 @@ function renderResultMeta(context: AnalysisContext | null) {
 
 function renderPrimarySummary(context: AnalysisContext | null, activeFrame: number, hasSequence: boolean, clipStartLabel: string | null, clipEndLabel: string | null) {
   if (!context) {
-    return "Waiting for your first query.";
+    return "Ask your first question — try \"Show me the lineups\" to begin.";
+  }
+
+  // Descriptive summaries for analyst-tablet modes
+  if (context.mode === "orientation") {
+    return (
+      <>
+        <strong>Team Orientation</strong>
+        {" — lineup, estimated formation, and substitution events derived from tracking data. Role labels (GK, CB, CM…) are inferred from average match positions."}
+      </>
+    );
+  }
+
+  if (context.mode === "pass_network") {
+    return (
+      <>
+        <strong>Pass Network</strong>
+        {" — nodes show average passing position, sized by volume. Edges show pass frequency between pairs. Thicker lines = more passes."}
+      </>
+    );
+  }
+
+  if (context.mode === "pass_sonars") {
+    return (
+      <>
+        <strong>Pass Sonars</strong>
+        {" — each player's directional pass distribution shown as a radar. Length of each spoke = proportion of passes in that direction."}
+      </>
+    );
+  }
+
+  if (context.mode === "physicality") {
+    return (
+      <>
+        <strong>Physicality Dashboard</strong>
+        {" — total distance, high-speed running (HSR), and sprint distance per player, ranked by total load."}
+      </>
+    );
+  }
+
+  if (context.mode === "auto_insights") {
+    return (
+      <>
+        <strong>Dangerous Transitions</strong>
+        {" — algorithmically detected moments where a team rapidly moved from defensive to attacking phase within a tight time window."}
+      </>
+    );
+  }
+
+  if (context.mode === "set_piece") {
+    return (
+      <>
+        <strong>Set-Piece Analysis</strong>
+        {" — defensive marking pairs at the set piece moment. Distance between each attacker-defender pair shown, sorted by proximity."}
+      </>
+    );
+  }
+
+  if (context.mode === "synthesis") {
+    return (
+      <>
+        <strong>Multi-Primitive Synthesis</strong>
+        {" — combined view across pass network, sonars, and physicality for a full tactical picture."}
+      </>
+    );
   }
 
   const eventContext = context.event;
@@ -1874,7 +1941,7 @@ export function AnalysisWorkspace() {
         }}
       >
         <p style={{ margin: 0, letterSpacing: "0.18em", textTransform: "uppercase", fontSize: 12, color: "var(--accent)" }}>
-          Next.js Frontend
+          Football Intelligence · {conversationContext ? `Turn ${conversationContext.turn_count}` : "Ready"}
         </p>
         <h1
           style={{
@@ -1898,52 +1965,101 @@ export function AnalysisWorkspace() {
             padding: "14px 16px",
           }}
         >
-          <strong>Status:</strong> {getStatusLabel(status)}
+          <span style={{
+            display: "inline-block",
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            background: status === "connected" ? "#2ecc71" : status === "connecting" ? "#f1c40f" : status === "error" ? "#e74c3c" : "#aaa",
+            marginRight: 8,
+            verticalAlign: "middle",
+            boxShadow: status === "connected" ? "0 0 6px rgba(46,204,113,0.6)" : "none",
+          }} />
+          <strong>{getStatusLabel(status)}</strong>
           {errorMessage ? (
             <p style={{ margin: "8px 0 0", color: "var(--accent)" }}>{errorMessage}</p>
           ) : null}
         </div>
 
-        <label style={{ display: "flex", flexDirection: "column", gap: 10, fontWeight: 700 }}>
-          Natural language query
-          <textarea
-            value={query}
-            onChange={(event) => {
-              const nextQuery = event.target.value;
-              startTransition(() => setQuery(nextQuery));
-            }}
-            style={{
-              minHeight: 124,
-              resize: "vertical",
-              borderRadius: 18,
-              border: "1px solid rgba(20, 32, 19, 0.14)",
-              padding: "14px 16px",
-              background: "rgba(255,255,255,0.86)",
-              color: "var(--ink)",
-            }}
-          />
-        </label>
-
-        <button
-          type="button"
-          onClick={() => sendQuery(query)}
-          disabled={status === "connecting"}
-          style={{
-            border: 0,
-            borderRadius: 999,
-            padding: "14px 20px",
-            fontWeight: 700,
-            color: "#fff8ef",
-            background: "linear-gradient(135deg, #a43408, #d75b1f)",
-            boxShadow: "0 16px 30px rgba(194,65,12,0.26)",
-            cursor: status === "connecting" ? "wait" : "pointer",
-          }}
-        >
-          Run Analysis Query
-        </button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <strong style={{ fontSize: 14 }}>Ask the analyst</strong>
+            <span style={{ fontSize: 11, fontWeight: 400, color: "var(--muted)", padding: "2px 8px", borderRadius: 999, background: "rgba(0,0,0,0.05)" }}>
+              {!context ? "L1 Orientation" :
+                context.mode === "orientation" ? "L1 → L2 Ready" :
+                context.mode === "pass_network" || context.mode === "pass_sonars" ? "L2 Functional" :
+                context.mode === "physicality" || context.mode === "auto_insights" ? "L3 Tactical" :
+                context.mode === "set_piece" || context.mode === "comparison" ? "L3 Tactical" : "L2 Functional"}
+            </span>
+          </div>
+          <div style={{ position: "relative" }}>
+            <textarea
+              value={query}
+              placeholder="e.g. Show me the lineups, Show Home pass network from 30 to 45 mins…"
+              onChange={(event) => {
+                const nextQuery = event.target.value;
+                startTransition(() => setQuery(nextQuery));
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  if (query.trim() && status !== "connecting") {
+                    sendQuery(query);
+                  }
+                }
+              }}
+              style={{
+                width: "100%",
+                minHeight: 96,
+                resize: "vertical",
+                borderRadius: 16,
+                border: "1px solid rgba(20, 32, 19, 0.14)",
+                padding: "12px 14px 44px 14px",
+                background: "rgba(255,255,255,0.9)",
+                color: "var(--ink)",
+                boxSizing: "border-box",
+                outline: "none",
+                transition: "border-color 0.15s, box-shadow 0.15s",
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = "rgba(20,32,19,0.3)";
+                e.currentTarget.style.boxShadow = "0 0 0 3px rgba(27,54,92,0.08)";
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = "rgba(20,32,19,0.14)";
+                e.currentTarget.style.boxShadow = "none";
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => sendQuery(query)}
+              disabled={status === "connecting" || !query.trim()}
+              style={{
+                position: "absolute",
+                bottom: 10,
+                right: 10,
+                border: 0,
+                borderRadius: 12,
+                padding: "8px 18px",
+                fontWeight: 700,
+                fontSize: 13,
+                color: "#fff8ef",
+                background: query.trim() ? "linear-gradient(135deg, #a43408, #d75b1f)" : "rgba(0,0,0,0.12)",
+                boxShadow: query.trim() ? "0 4px 14px rgba(194,65,12,0.3)" : "none",
+                cursor: (status === "connecting" || !query.trim()) ? "not-allowed" : "pointer",
+                transition: "all 0.2s",
+              }}
+            >
+              {status === "connecting" ? "…" : "Send ↵"}
+            </button>
+          </div>
+          <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
+            Press Enter to send · Shift+Enter for new line
+          </p>
+        </div>
 
         <div style={{ display: "grid", gap: 10 }}>
-          <strong style={{ fontSize: 14 }}>Quick prompts</strong>
+          <strong style={{ fontSize: 14 }}>Analyst Starters</strong>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {suggestedQueries.map((suggestedQuery) => (
               <button

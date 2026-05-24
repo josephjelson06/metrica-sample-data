@@ -4,8 +4,8 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Metrica Tactical Console",
-  description: "A Next.js frontend for live football event and tracking analysis.",
+  title: "Tactical Intelligence Tablet",
+  description: "Conversational football analytics — ask in plain language, get answers progressively.",
 };
 
 export default function RootLayout({
