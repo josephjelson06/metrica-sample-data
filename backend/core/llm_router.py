@@ -18,6 +18,7 @@ from backend.tools.db_engine import (
     get_buildup_tracking_window,
     get_event_tracking_window,
     get_team_shape_metrics_for_coordinates,
+    get_frame_team_metrics,
     get_tracking_frame,
     get_tracking_window,
     get_pass_network,
@@ -909,9 +910,10 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
         event_hint = _extract_event_hint(user_query)
         team_hint = _extract_team_hint(user_query)
         period_hint = _extract_period_hint(user_query)
-        target_events = list_events(event_type="SET PIECE", team=team_hint, period=period_hint, limit=1)
-        if target_events:
-            analysis = analyze_set_piece(str(target_events[0]["index"]))
+        # target_events = list_events() isn't easy here, let's use find_event
+        try:
+            target_event = find_event(event_type="SET PIECE", team=team_hint, period=period_hint, occurrence=1)
+            analysis = analyze_set_piece(target_event)
             result = {
                 "coordinates": analysis["coordinates"],
                 "sequence": None,
@@ -924,6 +926,8 @@ def route_analysis_query(user_query: str) -> dict[str, Any]:
                 },
             }
             return _finalize_analysis_result(result, wants_report)
+        except Exception as e:
+            pass # fallback to default routing if event not found
 
     if not buildup_intent and not transition_intent:
         aggregate_result = _resolve_aggregate_query(user_query)

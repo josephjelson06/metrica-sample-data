@@ -1388,17 +1388,14 @@ def find_dangerous_transitions(team: str) -> list[dict[str, Any]]:
         connection.close()
 
 
-def analyze_set_piece(event_id: str) -> dict[str, Any]:
-    events = list_events()
-    event = next((e for e in events if str(e.get("index")) == event_id or e.get("id") == event_id), None)
-    
+def analyze_set_piece(event: dict[str, Any]) -> dict[str, Any]:
     if not event:
-        raise ValueError(f"Event {event_id} not found.")
+        raise ValueError("Event is required for set piece analysis.")
         
-    frame = int(event["frame"])
+    frame = int(event.get("frame", 0))
     tracking_data = get_tracking_frame(frame)
     
-    attacking_team = event["team"]
+    attacking_team = event.get("team", "Home")
     defending_team = "Away" if attacking_team == "Home" else "Home"
     
     attackers = []

@@ -34,14 +34,21 @@ def _extract_query(message_text: str) -> str:
 
 
 def _build_render_message(analysis_result: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        "view": "PITCH_HOME",
+        "data": analysis_result.get("coordinates", {}),
+        "sequence": analysis_result.get("sequence"),
+        "context": analysis_result.get("context", {}),
+    }
+    
+    # Pass through Phase 3 specific dashboard metrics
+    for key in ["pass_network", "pass_sonars", "physicality", "auto_insights", "set_piece_analysis"]:
+        if key in analysis_result:
+            payload[key] = analysis_result[key]
+
     return {
         "type": "DATA_RENDER",
-        "payload": {
-            "view": "PITCH_HOME",
-            "data": analysis_result["coordinates"],
-            "sequence": analysis_result.get("sequence"),
-            "context": analysis_result["context"],
-        },
+        "payload": payload,
     }
 
 
